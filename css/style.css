@@ -446,3 +446,55 @@ code { background: var(--surface-2); padding: 2px 6px; border-radius: 6px; font-
 /* Locked paid game: let the cover grow so the message never gets cut off */
 .player.is-locked { aspect-ratio: auto; max-height: none; min-height: min(56.25vw, 78vh); display: grid; }
 .player.is-locked .player-cover { position: relative; inset: auto; padding: 32px 0; }
+
+/* ===== Login page ===== */
+.auth-page {
+  display: grid; grid-template-columns: 1fr minmax(320px, 440px); gap: 40px; align-items: center;
+  min-height: calc(100vh - 76px); padding-top: 40px; padding-bottom: 40px;
+}
+.auth-hero {
+  border-radius: 24px; padding: 44px; color: #fff; min-height: 420px; display: flex; flex-direction: column; justify-content: center;
+  background:
+    radial-gradient(circle at 85% 15%, rgba(0, 194, 255, 0.55), transparent 45%),
+    radial-gradient(circle at 10% 95%, rgba(255, 107, 203, 0.45), transparent 40%),
+    linear-gradient(135deg, #3b2bb5, #6c5ce7);
+  box-shadow: var(--shadow-lg);
+}
+.auth-hero h1 { font-family: "Bungee", sans-serif; font-weight: 400; font-size: clamp(28px, 3.6vw, 46px); line-height: 1.1; margin: 0 0 26px; }
+.auth-hero ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; font-size: 17px; font-weight: 600; }
+.auth-hero li { display: flex; gap: 12px; align-items: center; }
+.auth-hero li span { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: rgba(255,255,255,.16); font-size: 20px; flex-shrink: 0; }
+.auth-card { padding: 30px; }
+.auth-card h2 { margin: 18px 0 4px; font-size: 26px; }
+.auth-card #signedIn h2 { margin-top: 0; }
+.pass-wrap { position: relative; }
+.pass-wrap input { padding-right: 70px; }
+.pass-toggle {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: transparent;
+  color: var(--accent); font-weight: 700; cursor: pointer; padding: 6px 10px; border-radius: 8px;
+}
+.form-error { background: rgba(229, 72, 77, .12); color: var(--danger); border-radius: 10px; padding: 10px 12px; font-weight: 700; font-size: 14px; margin: 0 0 14px; }
+.switch-line { text-align: center; color: var(--muted); font-size: 14px; margin: 18px 0 0; }
+.switch-line button { border: 0; background: none; color: var(--accent); font-weight: 800; cursor: pointer; padding: 0; }
+.admin-tag { display: inline-block; margin-left: 6px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 999px; vertical-align: middle; letter-spacing: .5px; }
+@media (max-width: 860px) {
+  .auth-page { grid-template-columns: 1fr; gap: 20px; padding-top: 20px; }
+  .auth-hero { min-height: 0; padding: 26px; }
+  .auth-hero h1 { margin-bottom: 16px; }
+  .auth-hero ul { font-size: 15px; }
+}
+
+/* ===== Admin: unlock-a-game box ===== */
+.unlock-box { background: var(--surface-2); border: 1px solid var(--border); border-radius: 16px; padding: 18px; margin-bottom: 18px; }
+.unlock-box h3 { margin: 0 0 4px; font-size: 17px; }
+.unlock-box .sub { margin-bottom: 14px; }
+.unlock-box .field input, .unlock-box .field select { background: var(--surface); }
+.unlock-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.unlock-box .btn { width: 100%; }
+.unlock-result { font-size: 14px; font-weight: 700; margin-top: 10px; }
+.unlock-result.ok { color: var(--success); }
+.unlock-result.err { color: var(--danger); }
+.owned-chip .via { font-weight: 600; opacity: .8; }
+@media (max-width: 720px) { .unlock-grid { grid-template-columns: 1fr; } }
+.or-line { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; font-weight: 700; margin: 20px 0 16px; }
+.or-line::before, .or-line::after { content: ""; flex: 1; height: 1px; background: var(--border); }

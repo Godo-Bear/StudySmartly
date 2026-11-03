@@ -27,20 +27,22 @@
     </div>
   </header>
 
-  <!-- Login: the code is checked by the Cloudflare Worker (ADMIN_CODE secret) -->
-  <section class="login-wrap" id="loginView">
+  <!-- Login: an admin account, or the admin code (ADMIN_CODE secret) -->
+  <section class="login-wrap hidden" id="loginView">
     <div class="panel">
-      <h2>🛡️ Admin unlock</h2>
-      <p class="sub">Enter the admin code to add, edit or remove games.</p>
+      <h2>🛡️ Admin sign in</h2>
+      <p class="sub" id="accountNote">Log in with your admin account to manage games and unlock paid games.</p>
+      <a class="btn btn-primary" style="width:100%" id="accountLoginBtn" href="login.html?next=admin.html">Log in with my account</a>
+      <div class="or-line"><span>or use the admin code</span></div>
       <form id="loginForm">
         <div class="field">
           <label for="adminCode">Admin code</label>
-          <input id="adminCode" type="password" placeholder="••••••••" required autocomplete="current-password" autofocus>
+          <input id="adminCode" type="password" placeholder="••••••••" required autocomplete="current-password">
         </div>
         <label style="display:flex;gap:8px;align-items:center;font-size:14px;margin-bottom:16px">
           <input type="checkbox" id="remember"> Remember me on this device
         </label>
-        <button class="btn btn-primary" style="width:100%" type="submit" id="loginBtn">Unlock</button>
+        <button class="btn btn-ghost" style="width:100%" type="submit" id="loginBtn">Unlock with code</button>
       </form>
     </div>
   </section>
@@ -124,6 +126,38 @@
           <button class="btn btn-ghost btn-small" id="refreshUsersBtn" style="margin-left:auto">↻ Refresh</button>
         </div>
         <p class="sub">When someone pays a game's owner, unlock that game for their account here. Unlocks work right away.</p>
+
+        <form class="unlock-box" id="unlockForm">
+          <h3>🔓 Unlock a paid game</h3>
+          <p class="sub">They paid? Pick their account and the game they bought.</p>
+          <div class="unlock-grid">
+            <div class="field">
+              <label for="uUser">Account</label>
+              <input id="uUser" list="userList" placeholder="Type their username" autocomplete="off" required>
+              <datalist id="userList"></datalist>
+            </div>
+            <div class="field">
+              <label for="uGame">Paid game</label>
+              <select id="uGame" required></select>
+            </div>
+            <div class="field">
+              <label for="uPaid">Paid with</label>
+              <select id="uPaid">
+                <option>Cash</option>
+                <option>Bank transfer</option>
+                <option>Gift / free</option>
+                <option>Other</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="uNote">Note</label>
+              <input id="uNote" maxlength="100" placeholder="e.g. $2 at lunch (optional)">
+            </div>
+          </div>
+          <button class="btn btn-primary" type="submit" id="uSubmit">🔓 Unlock game</button>
+          <div class="unlock-result hidden" id="uResult"></div>
+        </form>
+
         <div class="field" style="margin-bottom:4px">
           <input id="userSearch" type="search" placeholder="Search usernames…" autocomplete="off">
         </div>

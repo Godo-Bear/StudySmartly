@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Log in · StudySmartly</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/common.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="./" class="logo">
+        <div class="logo-mark" data-icon="logo"></div>
+        <div class="logo-text">Study<span>Smartly</span></div>
+      </a>
+      <div class="header-actions" style="justify-content:flex-end">
+        <a class="btn btn-ghost btn-small" href="./">← Back to games</a>
+        <button class="icon-btn" data-theme-toggle aria-label="Toggle dark mode"></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="auth-page container">
+    <section class="auth-hero">
+      <h1>Your games,<br>one account.</h1>
+      <ul>
+        <li><span>🎮</span> Play every free game, no account needed</li>
+        <li><span>🔒</span> Own paid games once you've paid the creator</li>
+        <li><span>🛡️</span> Admins log in here to run the site</li>
+      </ul>
+    </section>
+
+    <section class="panel auth-card">
+      <!-- Already logged in -->
+      <div id="signedIn" class="hidden">
+        <h2>You're logged in 👋</h2>
+        <p class="sub" id="signedInText"></p>
+        <div class="actions" style="flex-direction:column">
+          <a class="btn btn-primary" id="continueBtn" href="./">Continue</a>
+          <a class="btn btn-ghost hidden" id="adminLink" href="admin.html">🛡️ Admin panel</a>
+          <button class="btn btn-ghost" id="logoutBtn">Log out</button>
+        </div>
+      </div>
+
+      <!-- Log in / sign up -->
+      <div id="authView">
+        <div class="auth-tabs" role="tablist">
+          <button type="button" role="tab" data-mode="login">Log in</button>
+          <button type="button" role="tab" data-mode="signup">Sign up</button>
+        </div>
+        <h2 id="authTitle"></h2>
+        <p class="sub" id="authSub"></p>
+        <form id="authForm" novalidate>
+          <div class="field">
+            <label for="authUser">Username</label>
+            <input id="authUser" autocomplete="username" required maxlength="20" autocapitalize="off" spellcheck="false">
+            <span class="hint" id="userHint">3-20 letters, numbers or _</span>
+          </div>
+          <div class="field">
+            <label for="authPass">Password</label>
+            <div class="pass-wrap">
+              <input id="authPass" type="password" required maxlength="200">
+              <button type="button" class="pass-toggle" id="passToggle" aria-label="Show password">Show</button>
+            </div>
+          </div>
+          <div class="field" id="confirmField">
+            <label for="authPass2">Confirm password</label>
+            <input id="authPass2" type="password" maxlength="200" autocomplete="new-password">
+          </div>
+          <p class="form-error hidden" id="formError" role="alert"></p>
+          <button class="btn btn-primary" style="width:100%" id="authSubmit" type="submit"></button>
+        </form>
+        <p class="switch-line" id="switchLine"></p>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/login.js"></script>
+</body>
+</html>

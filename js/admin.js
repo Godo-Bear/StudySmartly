@@ -6,6 +6,7 @@ const $ = (id) => document.getElementById(id);
 const STORE_KEY = "ss-admin-code";
 
 let adminCode = "";
+let me = null; // the logged-in admin account, when signed in that way
 let games = [];
 let editingId = null;
 let users = null; // null until loaded
@@ -34,7 +35,8 @@ async function api(path, opts = {}) {
   const res = await fetch(`/api/admin${path}`, {
     ...opts,
     headers: {
-      "X-Admin-Code": adminCode,
+      ...(adminCode ? { "X-Admin-Code": adminCode } : {}),
+      ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
       ...(opts.body ? { "Content-Type": "application/json" } : {}),
     },
   });
@@ -151,7 +153,7 @@ function startEdit(id) {
 function handleAuthError(err) {
   if (err.status === 401) {
     clearCode();
-    toast("Admin code changed. Please unlock again.", true);
+    toast(adminCode ? "Admin code changed. Please unlock again." : "You're no longer signed in as an admin.", true);
     setTimeout(() => location.reload(), 1200);
     return true;
   }
@@ -164,7 +166,7 @@ async function refresh() {
   try {
     games = (await api("/games")).games;
     renderTable();
-    setStatus("Unlocked · saving to the main branch", "ok");
+    setStatus(me ? `Signed in as ${me.username} (admin) · saving to the main branch` : "Unlocked with the admin code · saving to the main branch", "ok");
   } catch (err) {
     if (!handleAuthError(err)) setStatus(`Couldn't load games: ${err.message}`, "warn");
   } finally {
@@ -293,6 +295,7 @@ async function loadUsers() {
 function renderUsers() {
   if (!users) return;
   const paidGames = games.filter((g) => g.paid);
+  renderUnlockBox(paidGames);
   const q = $("userSearch").value.trim().toLowerCase();
   const list = users.filter((u) => !q || u.username.toLowerCase().includes(q));
   $("userCount").textContent = `(${users.length})`;
@@ -311,17 +314,20 @@ function renderUsers() {
       <div class="user-row">
         <div class="user-top">
           <span class="avatar" style="background:${gradientFor(u.username)}">${escapeHTML(u.username[0].toUpperCase())}</span>
-          <div><div class="uname">${escapeHTML(u.username)}</div>
+          <div><div class="uname">${escapeHTML(u.username)}${u.admin ? `<span class="admin-tag">ADMIN</span>` : ""}</div>
             <div class="udate">Joined ${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}</div></div>
-          <button class="btn btn-danger" data-del-user="${escapeHTML(u.username)}">Delete</button>
+          <button class="btn btn-ghost btn-small" style="margin-left:auto" data-admin="${escapeHTML(u.username)}" data-make="${u.admin ? "0" : "1"}">${u.admin ? "Remove admin" : "Make admin"}</button>
+          <button class="btn btn-danger" style="margin-left:0" data-del-user="${escapeHTML(u.username)}">Delete</button>
         </div>
         <div class="owned-list">
           ${owned.length
-            ? owned.map((g) => `<span class="owned-chip">✓ ${escapeHTML(g.name)}
-                <button title="Lock again" aria-label="Lock ${escapeHTML(g.name)} again" data-lock="${escapeHTML(u.username)}" data-game="${escapeHTML(g.id)}">×</button></span>`).join("")
+            ? owned.map((g) => { const info = (u.unlockInfo || {})[g.id]; return `<span class="owned-chip" title="${info ? escapeHTML(`Unlocked by ${info.by} on ${new Date(info.at).toLocaleDateString()}${info.note ? ` · ${info.note}` : ""}`) : ""}">✓ ${escapeHTML(g.name)}${info ? ` <span class="via">· ${escapeHTML(info.paidWith)}</span>` : ""}
+                <button title="Lock again" aria-label="Lock ${escapeHTML(g.name)} again" data-lock="${escapeHTML(u.username)}" data-game="${escapeHTML(g.id)}">×</button></span>`; }).join("")
             : `<span class="muted-note">No paid games unlocked</span>`}
         </div>
-        ${paidGames.length
+        ${u.admin
+          ? `<span class="muted-note">🛡️ Admin, so they can play every paid game</span>`
+          : paidGames.length
           ? options.length
             ? `<div class="unlock-row">
                 <select aria-label="Paid game to unlock for ${escapeHTML(u.username)}">
@@ -335,20 +341,55 @@ function renderUsers() {
   }).join("");
 }
 
-async function setUnlock(username, gameId, unlock) {
+async function setUnlock(username, gameId, unlock, payment = {}) {
   const g = games.find((x) => x.id === gameId);
   try {
     const { user } = await api(`/users/${encodeURIComponent(username)}/${unlock ? "unlock" : "lock"}`, {
-      method: "POST", body: JSON.stringify({ gameId }),
+      method: "POST", body: JSON.stringify({ gameId, ...payment }),
     });
     users = users.map((u) => (u.username === user.username ? user : u));
     renderUsers();
     toast(unlock ? `Unlocked “${g ? g.name : "game"}” for ${username} 🔓` : `Locked “${g ? g.name : "game"}” for ${username}`);
+    return true;
   } catch (err) {
     if (!handleAuthError(err)) toast(err.message, true);
     renderUsers();
+    return false;
   }
 }
+
+// The "Unlock a paid game" box: pick an account + a paid game.
+function renderUnlockBox(paidGames) {
+  $("userList").innerHTML = users.map((u) => `<option value="${escapeHTML(u.username)}">`).join("");
+  const picked = $("uGame").value;
+  $("uGame").innerHTML = paidGames.length
+    ? paidGames.map((g) => `<option value="${escapeHTML(g.id)}">${escapeHTML(g.name)}${g.price ? ` (${escapeHTML(g.price)})` : ""} · by ${escapeHTML(g.creator)}</option>`).join("")
+    : `<option value="">No paid games yet</option>`;
+  if (paidGames.some((g) => g.id === picked)) $("uGame").value = picked;
+  $("uSubmit").disabled = !paidGames.length || !users.length;
+}
+function unlockResult(msg, ok) {
+  $("uResult").textContent = msg;
+  $("uResult").className = `unlock-result ${ok ? "ok" : "err"}`;
+}
+
+$("unlockForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const typed = $("uUser").value.trim().toLowerCase();
+  const user = users.find((u) => u.username.toLowerCase() === typed);
+  const game = games.find((g) => g.id === $("uGame").value);
+  if (!user) return unlockResult(typed ? `There's no account called “${$("uUser").value.trim()}”. Ask them to sign up first.` : "Pick their account.", false);
+  if (!game) return unlockResult("Pick the game they paid for.", false);
+  if (user.unlocked.includes(game.id)) return unlockResult(`${user.username} already owns ${game.name}.`, false);
+  $("uSubmit").disabled = true;
+  const ok = await setUnlock(user.username, game.id, true, { paidWith: $("uPaid").value, note: $("uNote").value.trim() });
+  $("uSubmit").disabled = false;
+  if (ok) {
+    unlockResult(`✓ Unlocked ${game.name} for ${user.username} (${$("uPaid").value}).`, true);
+    $("uUser").value = "";
+    $("uNote").value = "";
+  }
+});
 
 $("userSearch").addEventListener("input", renderUsers);
 $("refreshUsersBtn").addEventListener("click", loadUsers);
@@ -357,13 +398,29 @@ $("userRows").addEventListener("click", async (e) => {
   if (unlockBtn) {
     unlockBtn.disabled = true;
     const gameId = unlockBtn.parentElement.querySelector("select").value;
-    return setUnlock(unlockBtn.dataset.unlock, gameId, true);
+    return setUnlock(unlockBtn.dataset.unlock, gameId, true, { paidWith: "Cash" });
   }
   const lockBtn = e.target.closest("[data-lock]");
   if (lockBtn) {
     const g = games.find((x) => x.id === lockBtn.dataset.game);
     if (!confirm(`Lock “${g ? g.name : "this game"}” for ${lockBtn.dataset.lock} again?`)) return;
     return setUnlock(lockBtn.dataset.lock, lockBtn.dataset.game, false);
+  }
+  const adminBtn = e.target.closest("[data-admin]");
+  if (adminBtn) {
+    const name = adminBtn.dataset.admin, make = adminBtn.dataset.make === "1";
+    if (!confirm(make
+      ? `Make ${name} an admin? They'll be able to add/delete games, unlock paid games and manage accounts.`
+      : `Remove admin from ${name}?`)) return;
+    try {
+      const { user } = await api(`/users/${encodeURIComponent(name)}/admin`, { method: "POST", body: JSON.stringify({ admin: make }) });
+      users = users.map((u) => (u.username === user.username ? user : u));
+      renderUsers();
+      toast(make ? `${name} is now an admin 🛡️` : `${name} is no longer an admin`);
+    } catch (err) {
+      if (!handleAuthError(err)) toast(err.message, true);
+    }
+    return;
   }
   const delBtn = e.target.closest("[data-del-user]");
   if (delBtn) {
@@ -401,13 +458,14 @@ $("loginForm").addEventListener("submit", async (e) => {
     toast(err.status === 404 ? "Admin API not found. Is the site running on Cloudflare?" : err.message, true);
   } finally {
     $("loginBtn").disabled = false;
-    $("loginBtn").textContent = "Unlock";
+    $("loginBtn").textContent = "Unlock with code";
   }
 });
 
 $("logoutBtn").addEventListener("click", () => {
   clearCode();
-  location.reload();
+  if (me) logOut(); // also ends the account session
+  else location.reload();
 });
 
 $("gameForm").addEventListener("input", renderPreview);
@@ -483,7 +541,21 @@ function showDashboard() {
 }
 
 /* ---------- Boot ---------- */
-fillIcons();
-initTheme();
-adminCode = loadCode();
-if (adminCode) showDashboard();
+(async function boot() {
+  fillIcons();
+  initTheme();
+  adminCode = loadCode();
+  if (adminCode) return showDashboard();
+
+  // Signed in with an admin account? Go straight in.
+  const user = await loadMe();
+  if (user && user.admin) {
+    me = user;
+    return showDashboard();
+  }
+  if (user) {
+    $("accountNote").innerHTML = `You're logged in as <b>${escapeHTML(user.username)}</b>, but that account isn't an admin yet. An admin can make it one, or use the admin code.`;
+    $("accountLoginBtn").classList.add("hidden");
+  }
+  $("loginView").classList.remove("hidden");
+})();

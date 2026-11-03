@@ -27,7 +27,7 @@ function render(games) {
   $("gameTitle").textContent = game.name;
   $("gameSub").innerHTML = `by ${escapeHTML(game.creator || "Unknown")}
     ${game.category ? `<span class="pill">${escapeHTML(game.category)}</span>` : ""}
-    ${game.paid ? `<span class="price-tag">${user && user.unlocked.includes(game.id) ? "✓ Owned" : `🔒 Paid${game.price ? ` · ${escapeHTML(game.price)}` : ""}`}</span>` : ""}`;
+    ${game.paid ? `<span class="price-tag">${user && (user.admin || user.unlocked.includes(game.id)) ? "✓ Owned" : `🔒 Paid${game.price ? ` · ${escapeHTML(game.price)}` : ""}`}</span>` : ""}`;
   if (game.paid) renderLock();
   if (game.description) $("gameDesc").textContent = game.description;
   else $("aboutPanel").classList.add("hidden");
@@ -43,7 +43,7 @@ function render(games) {
 
 // Paid games: show who to pay and what to do instead of the Play button.
 function renderLock() {
-  if (user && user.unlocked.includes(game.id)) return; // owned: normal Play button
+  if (user && (user.admin || user.unlocked.includes(game.id))) return; // owned: normal Play button
   playable = false;
   const owner = escapeHTML(game.creator || "the owner");
   const price = game.price ? ` <b>${escapeHTML(game.price)}</b>` : "";
@@ -60,7 +60,7 @@ function renderLock() {
           ? `<br>Your username is <code>${escapeHTML(user.username)}</code>. Send it to ${owner} when you pay.`
           : `<br>You need an account first.`}
       </div>
-      ${user ? "" : `<button type="button" class="btn btn-primary" data-open-auth="signup">Sign up / Log in</button>`}
+      ${user ? "" : `<a class="btn btn-primary" href="${loginURL("signup")}">Sign up / Log in</a>`}
     </div>`;
   $("fsBtn").disabled = true;
 }
@@ -107,7 +107,7 @@ function exitFullscreen() {
 }
 
 $("cover").addEventListener("click", (e) => {
-  if (!e.target.closest("[data-open-auth]")) startGame();
+  if (!e.target.closest("a")) startGame();
 });
 $("cover").addEventListener("keydown", (e) => {
   if ((e.key === "Enter" || e.key === " ") && e.target === $("cover")) { e.preventDefault(); startGame(); }

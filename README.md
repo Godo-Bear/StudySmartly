@@ -15,7 +15,12 @@ Tick **"Needs to pay owner to own"** when adding a game. You can also add a pric
 How a player gets a paid game:
 1. The player makes an account with the **Log in** button.
 2. They pay the game's owner however you like, such as cash or PayPal, and tell the owner their username.
-3. An admin unlocks the game for that username under **Player accounts** in the admin panel.
+3. An admin opens **Player accounts → Unlock a paid game** in the admin panel. They pick the account and the game, choose how it was paid (Cash, for example), and click Unlock. The panel records who unlocked it, when, and the payment method.
+
+## Admin accounts
+Anyone can make an account on `login.html`. In the admin panel, click **Make admin** next to an account.
+
+Admin accounts open the admin panel without the code, by logging in normally, and can play every paid game. The `ADMIN_CODE` still works as a backup. Admins can't remove their own admin status or delete their own account.
 
 Paid games' links are never put in the public `games.json`. The Worker only gives the link to accounts the game is unlocked for.
 

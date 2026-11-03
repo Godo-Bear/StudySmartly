@@ -1,6 +1,7 @@
 // StudySmartly Worker
 // - Serves the static site (via the ASSETS binding).
-// - /api/admin/*  admin panel. Unlocked with the ADMIN_CODE secret. Saves
+// - /api/admin/*  admin panel. Unlocked with the ADMIN_CODE secret or by
+//   logging in with an account an admin has marked as admin. Saves
 //   data/games.json + thumbnails to main on GitHub using GITHUB_TOKEN.
 // - /api/auth/*, /api/me, /api/play/:id  player accounts and paid games.
 //   Accounts, sessions, unlocks and the links of paid games live in the DB
@@ -76,7 +77,7 @@ async function handleApi(request, env, url) {
     if (!gameUrl) throw httpError(404, "That isn't a paid game.");
     const user = await currentUser(request, env);
     if (!user) throw httpError(401, "Log in to play this game.");
-    if (!user.unlocked.includes(play[1])) throw httpError(403, "This game hasn't been unlocked for your account yet.");
+    if (!user.admin && !user.unlocked.includes(play[1])) throw httpError(403, "This game hasn't been unlocked for your account yet.");
     return json({ url: gameUrl });
   }
 
@@ -88,13 +89,23 @@ async function handleAdmin(request, env, path, method) {
   if (!env.ADMIN_CODE || !env.GITHUB_TOKEN) {
     throw httpError(503, "Admin isn't set up yet: add the ADMIN_CODE and GITHUB_TOKEN secrets in Cloudflare.");
   }
+  // Admins get in with the admin code OR with an admin account's login.
   const code = request.headers.get("X-Admin-Code") || "";
-  if (!(await safeEqual(code, env.ADMIN_CODE))) {
-    await sleep(600); // slow down guessing
-    throw httpError(401, "Wrong admin code.");
+  let me = null;
+  if (!(code && (await safeEqual(code, env.ADMIN_CODE)))) {
+    me = await currentUser(request, env);
+    if (!me || !me.admin) {
+      if (code) {
+        await sleep(600); // slow down guessing
+        throw httpError(401, "Wrong admin code.");
+      }
+      throw httpError(401, me ? "Your account isn't an admin." : "Log in with an admin account or use the admin code.");
+    }
   }
 
-  if (path === "/api/admin/login" && method === "POST") return json({ ok: true });
+  if (path === "/api/admin/login" && method === "POST") {
+    return json({ ok: true, via: me ? "account" : "code", user: me ? publicUser(me) : null });
+  }
 
   if (path === "/api/admin/games" && method === "GET") {
     return json({ games: await withPrivateUrls(env, (await readGames(env)).games) });
@@ -164,21 +175,40 @@ async function handleAdmin(request, env, path, method) {
     return json({ users: await listUsers(env) });
   }
 
-  const u = path.match(/^\/api\/admin\/users\/([\w]+)(?:\/(unlock|lock))?$/);
+  const u = path.match(/^\/api\/admin\/users\/([\w]+)(?:\/(unlock|lock|admin))?$/);
   if (u) {
     const user = await getUser(env, u[1]);
     if (!user) throw httpError(404, "That account doesn't exist.");
     const key = `user:${user.username.toLowerCase()}`;
 
+    if (u[2] === "admin" && method === "POST") {
+      const { admin } = await request.json();
+      if (!admin && me && me.username === user.username) throw httpError(400, "You can't remove your own admin. Ask another admin.");
+      if (admin) user.admin = true; else delete user.admin;
+      await env.DB.put(key, JSON.stringify(user));
+      return json({ user: publicUser(user) });
+    }
     if (u[2] && method === "POST") {
-      const { gameId } = await request.json();
+      const { gameId, paidWith, note } = await request.json();
       if (!/^[\w-]+$/.test(String(gameId || ""))) throw httpError(400, "Pick a game.");
       user.unlocked = user.unlocked.filter((x) => x !== gameId);
-      if (u[2] === "unlock") user.unlocked.push(gameId);
+      user.unlockInfo = user.unlockInfo || {};
+      delete user.unlockInfo[gameId];
+      if (u[2] === "unlock") {
+        user.unlocked.push(gameId);
+        // Keep a record of the payment, e.g. cash, for the owner.
+        user.unlockInfo[gameId] = {
+          by: me ? me.username : "admin code",
+          at: new Date().toISOString(),
+          paidWith: String(paidWith || "Cash").slice(0, 30),
+          note: String(note || "").trim().slice(0, 100),
+        };
+      }
       await env.DB.put(key, JSON.stringify(user));
       return json({ user: publicUser(user) });
     }
     if (!u[2] && method === "DELETE") {
+      if (me && me.username === user.username) throw httpError(400, "You can't delete your own account here.");
       await env.DB.delete(key);
       return json({ ok: true });
     }
@@ -206,7 +236,10 @@ async function getUser(env, name) {
   return user;
 }
 function publicUser(user) {
-  return { username: user.username, unlocked: user.unlocked, createdAt: user.createdAt };
+  return {
+    username: user.username, unlocked: user.unlocked, unlockInfo: user.unlockInfo || {},
+    admin: !!user.admin, createdAt: user.createdAt,
+  };
 }
 async function listUsers(env) {
   const users = [];
