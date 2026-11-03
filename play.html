@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Play · StudySmartly</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/common.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="./" class="logo">
+        <div class="logo-mark" data-icon="logo"></div>
+        <div class="logo-text">Study<span>Smartly</span></div>
+      </a>
+      <div class="header-actions">
+        <form class="search" action="./" role="search">
+          <input name="q" type="search" placeholder="Search game or creator" aria-label="Search games" autocomplete="off">
+          <button type="submit" aria-label="Search" data-icon="search"></button>
+        </form>
+        <button class="icon-btn" data-theme-toggle aria-label="Toggle dark mode"></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container play-page">
+    <div id="notFound" class="empty hidden" style="margin-top:30px">
+      <div class="big">🕹️</div>
+      <h3>Game not found</h3>
+      <p>It may have been removed. <a href="./" style="color:var(--accent);font-weight:700">Browse all games →</a></p>
+    </div>
+
+    <div id="playView" class="hidden">
+      <div class="player" id="player">
+        <!-- Cover shown until the user presses Play -->
+        <button class="player-cover" id="cover" aria-label="Start game">
+          <div class="cover-bg" id="coverBg"></div>
+          <div class="cover-content">
+            <div class="cover-thumb" id="coverThumb"></div>
+            <div class="cover-title" id="coverTitle"></div>
+            <span class="cover-play"><span data-icon="play"></span> Play</span>
+          </div>
+        </button>
+        <iframe id="frame" title="Game" class="hidden"
+          allow="fullscreen; autoplay; gamepad; clipboard-write; pointer-lock"
+          allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>
+        <button class="exit-fs" id="exitFs" aria-label="Exit fullscreen">✕ Exit fullscreen</button>
+      </div>
+
+      <div class="play-bar">
+        <div class="play-title">
+          <h1 id="gameTitle"></h1>
+          <div class="play-sub" id="gameSub"></div>
+        </div>
+        <div class="play-actions">
+          <button class="btn btn-ghost" id="fsBtn"><span class="ic" data-icon="expand"></span> Fullscreen</button>
+          <button class="btn btn-dark" id="shareBtn"><span class="ic" data-icon="share"></span> Share</button>
+        </div>
+      </div>
+
+      <section class="panel play-about" id="aboutPanel">
+        <h2>About this game</h2>
+        <p id="gameDesc"></p>
+      </section>
+
+      <div class="section-head">
+        <span data-icon="plus"></span>
+        <h2>More Games</h2>
+      </div>
+      <div class="grid" id="moreGrid"></div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <span>© <span id="year"></span> StudySmartly · Made by friends, for friends.</span>
+      <a href="admin.html">Admin panel →</a>
+    </div>
+  </footer>
+
+  <script src="js/play.js"></script>
+</body>
+</html>

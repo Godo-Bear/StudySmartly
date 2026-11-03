@@ -8,6 +8,8 @@ const STORE_KEY = "ss-admin-code";
 let adminCode = "";
 let games = [];
 let editingId = null;
+const recentImages = {}; // id -> dataURL, so new pictures show before the site redeploys
+let pendingImage = null; // { dataURL, base64, type } of a newly picked thumbnail
 
 /* ---------- Remembering the code ---------- */
 function loadCode() {
@@ -61,7 +63,7 @@ function renderTable() {
   $("gameRows").innerHTML = sorted.length
     ? sorted.map((g) => `
       <tr>
-        <td><div class="mini-thumb">${thumbHTML(g)}</div></td>
+        <td><div class="mini-thumb">${thumbHTML({ ...g, thumbnail: recentImages[g.id] || g.thumbnail })}</div></td>
         <td><div class="name">${escapeHTML(g.name)}</div><div class="url"><a href="${escapeHTML(safeURL(g.url))}" target="_blank" rel="noopener">${escapeHTML(g.url)}</a></div></td>
         <td>${escapeHTML(g.creator)}</td>
         <td>${escapeHTML(g.category || "—")}</td>
@@ -84,14 +86,20 @@ function formData() {
     creator: $("fCreator").value.trim(),
     url: $("fUrl").value.trim(),
     category: $("fCategory").value.trim(),
-    thumbnail: $("fThumb").value.trim(),
     description: $("fDesc").value.trim(),
   };
+}
+
+function currentThumb() {
+  if (pendingImage) return pendingImage.dataURL;
+  const g = editingId && games.find((x) => x.id === editingId);
+  return g ? recentImages[g.id] || g.thumbnail || "" : "";
 }
 
 function renderPreview() {
   const g = formData();
   g.name = g.name || "Game name";
+  g.thumbnail = currentThumb();
   $("preview").innerHTML = `
     <div class="thumb">${thumbHTML(g)}${g.category ? `<span class="badge">${escapeHTML(g.category)}</span>` : ""}</div>
     <div class="card-body">
@@ -103,6 +111,7 @@ function renderPreview() {
 function resetForm() {
   editingId = null;
   $("gameForm").reset();
+  setImage(null);
   $("formTitle").textContent = "Add a game";
   $("saveBtn").textContent = "Add game";
   $("cancelEdit").classList.add("hidden");
@@ -117,7 +126,7 @@ function startEdit(id) {
   $("fCreator").value = g.creator || "";
   $("fUrl").value = g.url || "";
   $("fCategory").value = g.category || "";
-  $("fThumb").value = g.thumbnail || "";
+  setImage(null);
   $("fDesc").value = g.description || "";
   $("formTitle").textContent = `Edit “${g.name}”`;
   $("saveBtn").textContent = "Save changes";
@@ -149,6 +158,64 @@ async function refresh() {
     setBusy(false);
   }
 }
+
+/* ---------- Thumbnail upload ---------- */
+const MAX_SIDE = 512;
+const ACCEPTED = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+
+function setImage(img) {
+  pendingImage = img;
+  const editing = editingId && games.find((x) => x.id === editingId);
+  const shown = img ? img.dataURL : editing && (recentImages[editing.id] || editing.thumbnail);
+  $("uploadThumb").innerHTML = shown ? `<img src="${escapeHTML(shown)}" alt="">` : "🖼️";
+  $("uploadLabel").textContent = img ? "Picture ready ✓" : editing ? "Change picture" : "Upload a picture";
+  $("uploadHint").textContent = img
+    ? "Click to pick a different one"
+    : editing ? "Optional · leave it to keep the current picture" : "PNG, JPG, WebP or GIF · click or drag it here";
+  $("thumbReq").classList.toggle("hidden", !!editing);
+  $("fThumbFile").value = "";
+  renderPreview();
+}
+
+// Shrink the picture to a square-ish thumbnail so the repo stays small.
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("That file isn't a picture we can read.")); };
+    img.src = url;
+  });
+}
+async function processImage(file) {
+  if (!ACCEPTED.includes(file.type)) throw new Error("Please pick a PNG, JPG, WebP or GIF picture.");
+  if (file.size > 15 * 1024 * 1024) throw new Error("That picture is too big (max 15 MB).");
+  const img = await loadImage(file);
+  const scale = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+  canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+  let dataURL = canvas.toDataURL("image/webp", 0.85);
+  if (!dataURL.startsWith("data:image/webp")) dataURL = canvas.toDataURL("image/png");
+  const [head, base64] = dataURL.split(",");
+  return { dataURL, base64, type: head.slice(5, head.indexOf(";")) };
+}
+async function pickFile(file) {
+  if (!file) return;
+  try {
+    setImage(await processImage(file));
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+$("fThumbFile").addEventListener("change", (e) => pickFile(e.target.files[0]));
+["dragenter", "dragover"].forEach((ev) =>
+  $("uploadBox").addEventListener(ev, (e) => { e.preventDefault(); $("uploadBox").classList.add("drag"); }));
+["dragleave", "drop"].forEach((ev) =>
+  $("uploadBox").addEventListener(ev, (e) => { e.preventDefault(); $("uploadBox").classList.remove("drag"); }));
+$("uploadBox").addEventListener("drop", (e) => pickFile(e.dataTransfer.files[0]));
 
 /* ---------- Events ---------- */
 $("loginForm").addEventListener("submit", async (e) => {
@@ -183,16 +250,20 @@ $("gameForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const data = formData();
   if (!safeURL(data.url)) return toast("The game link must start with http:// or https://", true);
-  if (data.thumbnail && !safeURL(data.thumbnail)) return toast("The thumbnail must be an http(s) link", true);
+  if (!editingId && !pendingImage) return toast("Please upload a thumbnail picture", true);
+  if (pendingImage) data.image = { data: pendingImage.base64, type: pendingImage.type };
 
   setBusy(true);
   setStatus("Saving…");
   try {
     if (editingId) {
+      if (pendingImage) recentImages[editingId] = pendingImage.dataURL;
       games = (await api(`/games/${encodeURIComponent(editingId)}`, { method: "PUT", body: JSON.stringify(data) })).games;
       toast(`Saved “${data.name}”`);
     } else {
-      games = (await api("/games", { method: "POST", body: JSON.stringify(data) })).games;
+      const res = await api("/games", { method: "POST", body: JSON.stringify(data) });
+      if (pendingImage) recentImages[res.game.id] = pendingImage.dataURL;
+      games = res.games;
       toast(`Added “${data.name}” 🎉`);
     }
     resetForm();

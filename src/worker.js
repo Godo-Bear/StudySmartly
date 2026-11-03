@@ -5,6 +5,9 @@
 //   using the GITHUB_TOKEN secret (which never reaches the browser).
 
 const FILE_PATH = "data/games.json";
+const IMAGE_DIR = "images";
+const IMAGE_TYPES = { "image/webp": "webp", "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif" };
+const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
 
 export default {
   async fetch(request, env) {
@@ -42,33 +45,45 @@ async function handleApi(request, env, url) {
   }
 
   if (path === "/api/games" && method === "POST") {
-    const data = clean(await request.json());
-    const game = { id: crypto.randomUUID(), ...data, addedAt: new Date().toISOString() };
+    const body = await request.json();
+    const data = clean(body);
+    const image = checkImage(body.image);
+    if (!image) throw httpError(400, "Please upload a thumbnail picture.");
+    const id = crypto.randomUUID();
+    data.thumbnail = await saveImage(env, id, image, data.name);
+    const game = { id, ...data, addedAt: new Date().toISOString() };
     const games = await mutate(env, (list) => [...list, game], `Add game: ${game.name} by ${game.creator}`);
     return json({ games, game }, 201);
   }
 
   const m = path.match(/^\/api\/games\/([\w-]+)$/);
   if (m && method === "PUT") {
-    const data = clean(await request.json());
-    let name = data.name;
+    const body = await request.json();
+    const data = clean(body);
+    const image = checkImage(body.image);
+    if (image) data.thumbnail = await saveImage(env, m[1], image, data.name);
+    let oldThumb = "";
     const games = await mutate(env, (list) => {
       const g = list.find((x) => String(x.id) === m[1]);
       if (!g) throw httpError(404, "That game no longer exists.");
+      oldThumb = g.thumbnail || "";
       Object.assign(g, data, { updatedAt: new Date().toISOString() });
       return list;
-    }, `Update game: ${name}`);
+    }, `Update game: ${data.name}`);
+    if (image && oldThumb !== data.thumbnail) await deleteImage(env, oldThumb);
     return json({ games });
   }
 
   if (m && method === "DELETE") {
-    let removed = "";
+    let removed = "", thumb = "";
     const games = await mutate(env, (list) => {
       const g = list.find((x) => String(x.id) === m[1]);
       if (!g) throw httpError(404, "That game no longer exists.");
       removed = g.name;
+      thumb = g.thumbnail || "";
       return list.filter((x) => x !== g);
     }, () => `Remove game: ${removed}`);
+    await deleteImage(env, thumb);
     return json({ games });
   }
 
@@ -83,16 +98,53 @@ function clean(body) {
     creator: str(body.creator, 60),
     url: str(body.url, 500),
     category: str(body.category, 30),
-    thumbnail: str(body.thumbnail, 500),
     description: str(body.description, 400),
   };
   if (!data.name || !data.creator || !data.url) throw httpError(400, "Name, creator and link are required.");
   if (!isHttp(data.url)) throw httpError(400, "The game link must start with http:// or https://");
-  if (data.thumbnail && !isHttp(data.thumbnail)) throw httpError(400, "The thumbnail must be an http(s) link.");
   return data;
 }
 function isHttp(u) {
   try { return ["http:", "https:"].includes(new URL(u).protocol); } catch { return false; }
+}
+
+/* ---------- Thumbnails ---------- */
+function checkImage(image) {
+  if (!image) return null;
+  const ext = IMAGE_TYPES[image.type];
+  if (!ext) throw httpError(400, "Thumbnail must be a PNG, JPG, WebP or GIF picture.");
+  const data = String(image.data || "").replace(/\s/g, "");
+  if (!/^[A-Za-z0-9+/]+=*$/.test(data)) throw httpError(400, "That picture couldn't be read.");
+  if ((data.length * 3) / 4 > MAX_IMAGE_BYTES) throw httpError(400, "That picture is too big.");
+  return { data, ext };
+}
+
+// Commit the picture to images/ on main. Each upload gets a new name so the
+// browser never shows an old cached picture.
+async function saveImage(env, id, image, name) {
+  const path = `${IMAGE_DIR}/${id}-${Date.now().toString(36)}.${image.ext}`;
+  await gh(env, `/contents/${path}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      message: `Upload thumbnail: ${name}`,
+      content: image.data,
+      branch: env.GITHUB_BRANCH || "main",
+    }),
+  });
+  return path;
+}
+
+// Best effort: remove an old uploaded picture we no longer use.
+async function deleteImage(env, path) {
+  if (!path || !path.startsWith(`${IMAGE_DIR}/`) || path.includes("..")) return;
+  try {
+    const branch = env.GITHUB_BRANCH || "main";
+    const file = await gh(env, `/contents/${path}?ref=${encodeURIComponent(branch)}`);
+    await gh(env, `/contents/${path}`, {
+      method: "DELETE",
+      body: JSON.stringify({ message: `Remove old thumbnail ${path}`, sha: file.sha, branch }),
+    });
+  } catch {}
 }
 
 /* ---------- GitHub storage ---------- */

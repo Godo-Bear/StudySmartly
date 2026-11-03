@@ -65,16 +65,21 @@
             <label for="fUrl">Game link <span class="req">*</span></label>
             <input id="fUrl" type="url" required placeholder="https://…">
           </div>
-          <div class="row">
-            <div class="field">
-              <label for="fCategory">Category</label>
-              <input id="fCategory" maxlength="30" placeholder="Action" list="categoryList">
-              <datalist id="categoryList"></datalist>
-            </div>
-            <div class="field">
-              <label for="fThumb">Thumbnail image URL</label>
-              <input id="fThumb" type="url" placeholder="optional">
-            </div>
+          <div class="field">
+            <label for="fCategory">Category</label>
+            <input id="fCategory" maxlength="30" placeholder="Action" list="categoryList">
+            <datalist id="categoryList"></datalist>
+          </div>
+          <div class="field">
+            <label>Thumbnail <span class="req" id="thumbReq">*</span></label>
+            <label class="upload" id="uploadBox">
+              <input id="fThumbFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
+              <div class="upload-thumb" id="uploadThumb">🖼️</div>
+              <div class="upload-text">
+                <b id="uploadLabel">Upload a picture</b>
+                <span id="uploadHint">PNG, JPG, WebP or GIF · click or drag it here</span>
+              </div>
+            </label>
           </div>
           <div class="field">
             <label for="fDesc">Description</label>

@@ -1,23 +1,7 @@
-// StudySmartly — public game library
+// StudySmartly — home page game library
 
 const state = { games: [], category: "All", query: "" };
-
 const $ = (id) => document.getElementById(id);
-
-async function loadGames() {
-  try {
-    // cache-bust so newly added games show up right away
-    const res = await fetch(`data/games.json?t=${Date.now()}`);
-    if (!res.ok) throw new Error(res.status);
-    const data = await res.json();
-    state.games = (Array.isArray(data) ? data : data.games || [])
-      .filter((g) => g && g.name && g.url)
-      .sort((a, b) => new Date(b.addedAt || 0) - new Date(a.addedAt || 0));
-  } catch (err) {
-    console.error("Could not load games.json", err);
-    state.games = [];
-  }
-}
 
 function categories() {
   const counts = {};
@@ -60,22 +44,7 @@ function renderGrid() {
       : `<div class="empty"><div class="big">🎮</div><h3>No games yet</h3><p>Admins can add the first game from the <a href="admin.html" style="color:var(--accent);font-weight:700">admin panel</a>.</p></div>`;
     return;
   }
-
-  $("grid").innerHTML = list
-    .map((g) => `
-      <button class="card" data-id="${escapeHTML(g.id)}" aria-label="Open ${escapeHTML(g.name)}">
-        <div class="thumb">
-          ${thumbHTML(g)}
-          ${g.category ? `<span class="badge">${escapeHTML(g.category)}</span>` : ""}
-          ${isNew(g) ? `<span class="badge new">NEW</span>` : ""}
-          <div class="play-overlay"><span>${ICONS.play}</span></div>
-        </div>
-        <div class="card-body">
-          <div class="card-title">${escapeHTML(g.name)}</div>
-          <div class="card-creator">by ${escapeHTML(g.creator || "Unknown")}</div>
-        </div>
-      </button>`)
-    .join("");
+  $("grid").innerHTML = list.map(cardHTML).join("");
 }
 
 function renderStats() {
@@ -84,27 +53,6 @@ function renderStats() {
   $("statCreators").textContent = creators.size;
 }
 
-/* ---------- Modal ---------- */
-function openModal(game) {
-  $("modalThumb").innerHTML = thumbHTML(game);
-  $("modalTitle").textContent = game.name;
-  $("modalMeta").innerHTML = `
-    <span class="pill">by <b>${escapeHTML(game.creator || "Unknown")}</b></span>
-    ${game.category ? `<span class="pill">${escapeHTML(game.category)}</span>` : ""}
-    ${game.addedAt ? `<span class="pill">Added ${new Date(game.addedAt).toLocaleDateString()}</span>` : ""}`;
-  $("modalDesc").textContent = game.description || "No description yet — just hit play and find out!";
-  const url = safeURL(game.url);
-  $("modalPlay").href = url || "#";
-  $("modal").classList.add("open");
-  $("modal").setAttribute("aria-hidden", "false");
-  $("modalPlay").focus();
-}
-function closeModal() {
-  $("modal").classList.remove("open");
-  $("modal").setAttribute("aria-hidden", "true");
-}
-
-/* ---------- Events ---------- */
 $("chips").addEventListener("click", (e) => {
   const chip = e.target.closest(".chip");
   if (!chip) return;
@@ -113,29 +61,20 @@ $("chips").addEventListener("click", (e) => {
   renderGrid();
 });
 
-$("grid").addEventListener("click", (e) => {
-  const card = e.target.closest(".card");
-  if (!card) return;
-  const game = state.games.find((g) => String(g.id) === card.dataset.id);
-  if (game) openModal(game);
-});
-
 $("searchInput").addEventListener("input", (e) => {
   state.query = e.target.value.trim();
   renderGrid();
 });
 $("searchForm").addEventListener("submit", (e) => e.preventDefault());
 
-$("modalClose").addEventListener("click", closeModal);
-$("modal").addEventListener("click", (e) => { if (e.target.id === "modal") closeModal(); });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
-
-/* ---------- Boot ---------- */
 (async function init() {
   fillIcons();
   initTheme();
   $("year").textContent = new Date().getFullYear();
-  await loadGames();
+  // Searches submitted from the play page arrive as ?q=
+  const q = new URLSearchParams(location.search).get("q");
+  if (q) { state.query = q.trim(); $("searchInput").value = state.query; }
+  state.games = await fetchGames();
   renderStats();
   renderChips();
   renderGrid();

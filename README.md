@@ -3,8 +3,11 @@
 A modern game library for games made by me and my friends. Visitors browse, search and filter games, then hit **Play** to open the game's link. Admins add, edit and remove games from the admin panel.
 
 ## Pages
-- **`index.html`**: the public site. Category chips, search, dark mode, and a game pop-up with a Play button.
-- **`admin.html`**: the admin panel. Add a game with its **name, creator, link**, plus an optional category, thumbnail and description. You can also edit or delete games.
+- **`index.html`**: the home page, with category chips, search and dark mode. Clicking a game opens its play page.
+- **`play.html`**: plays the game inside StudySmartly, with Fullscreen and Share buttons and more games underneath.
+- **`admin.html`**: the admin panel. Add a game with its **name, creator, link and a thumbnail picture**, plus an optional category and description. You can also edit or delete games.
+
+Uploaded thumbnails are shrunk to 512px in the browser and saved in `images/`.
 
 All games live in [`data/games.json`](data/games.json) on the **`main`** branch.
 

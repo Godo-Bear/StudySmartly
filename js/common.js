@@ -7,6 +7,8 @@ const ICONS = {
   sun: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
   play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"><path d="M12 4v16M4 12h16"/></svg>',
+  expand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>',
+  share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>',
   shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
 };
 
@@ -44,7 +46,9 @@ function initials(name) {
 }
 
 function thumbHTML(game) {
-  const img = safeURL(game.thumbnail || "");
+  const t = String(game.thumbnail || "");
+  // allow http(s) links, site paths, and freshly uploaded data:image pictures
+  const img = /^data:image\/(png|jpeg|webp|gif);base64,/.test(t) ? t : safeURL(t);
   const fallback = `<div class="thumb-fallback" style="background:${gradientFor(game.name)}">${escapeHTML(initials(game.name))}</div>`;
   if (!img) return fallback;
   // If the image fails to load, swap to the gradient fallback.
@@ -106,3 +110,38 @@ function toast(msg, isError = false) {
 
 // Apply theme ASAP to avoid a flash.
 applyTheme(getTheme());
+
+/* ---------- Games data + cards (shared by home and play pages) ---------- */
+async function fetchGames() {
+  try {
+    const res = await fetch(`data/games.json?t=${Date.now()}`); // cache-bust for fresh adds
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    return (Array.isArray(data) ? data : data.games || [])
+      .filter((g) => g && g.name && g.url)
+      .sort((a, b) => new Date(b.addedAt || 0) - new Date(a.addedAt || 0));
+  } catch (err) {
+    console.error("Could not load games.json", err);
+    return [];
+  }
+}
+
+function playURL(game) {
+  return `play.html?id=${encodeURIComponent(game.id)}`;
+}
+
+function cardHTML(g) {
+  return `
+    <a class="card" href="${playURL(g)}" aria-label="Play ${escapeHTML(g.name)}">
+      <div class="thumb">
+        ${thumbHTML(g)}
+        ${g.category ? `<span class="badge">${escapeHTML(g.category)}</span>` : ""}
+        ${isNew(g) ? `<span class="badge new">NEW</span>` : ""}
+        <div class="play-overlay"><span>${ICONS.play}</span></div>
+      </div>
+      <div class="card-body">
+        <div class="card-title">${escapeHTML(g.name)}</div>
+        <div class="card-creator">by ${escapeHTML(g.creator || "Unknown")}</div>
+      </div>
+    </a>`;
+}
