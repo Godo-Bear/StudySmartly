@@ -27,37 +27,21 @@
     </div>
   </header>
 
-  <!-- Login: admins sign in with a GitHub token that has write access to the repo -->
+  <!-- Login: the code is checked by the Cloudflare Worker (ADMIN_CODE secret) -->
   <section class="login-wrap" id="loginView">
     <div class="panel">
-      <h2>🛡️ Admin sign in</h2>
-      <p class="sub">Games are saved straight to the <b>main</b> branch of the GitHub repo, so only people with write access to the repo can add or remove games.</p>
+      <h2>🛡️ Admin unlock</h2>
+      <p class="sub">Enter the admin code to add, edit or remove games.</p>
       <form id="loginForm">
-        <div class="row">
-          <div class="field"><label for="ghOwner">Repo owner</label><input id="ghOwner" required></div>
-          <div class="field"><label for="ghRepo">Repo name</label><input id="ghRepo" required></div>
-        </div>
-        <div class="field"><label for="ghBranch">Branch</label><input id="ghBranch" value="main" required></div>
         <div class="field">
-          <label for="ghToken">GitHub access token <span class="req">*</span></label>
-          <input id="ghToken" type="password" placeholder="github_pat_…" required autocomplete="off">
-          <span class="hint">Stored only in this browser. Never share it.</span>
+          <label for="adminCode">Admin code</label>
+          <input id="adminCode" type="password" placeholder="••••••••" required autocomplete="current-password" autofocus>
         </div>
         <label style="display:flex;gap:8px;align-items:center;font-size:14px;margin-bottom:16px">
-          <input type="checkbox" id="remember" checked> Remember me on this device
+          <input type="checkbox" id="remember"> Remember me on this device
         </label>
-        <button class="btn btn-primary" style="width:100%" type="submit" id="loginBtn">Sign in</button>
+        <button class="btn btn-primary" style="width:100%" type="submit" id="loginBtn">Unlock</button>
       </form>
-      <details class="help">
-        <summary>How do I get a token?</summary>
-        <ol>
-          <li>Go to <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener" style="color:var(--accent)">GitHub → Fine-grained tokens</a>.</li>
-          <li>Under <b>Repository access</b>, pick only this repo.</li>
-          <li>Under <b>Permissions → Contents</b>, choose <b>Read and write</b>.</li>
-          <li>Generate it and paste it above.</li>
-        </ol>
-        To add another admin, invite them as a collaborator on the repo; they make their own token.
-      </details>
     </div>
   </section>
 
@@ -110,7 +94,7 @@
           <h2 style="margin:0">All games <span id="gameCount" style="color:var(--muted);font-weight:600"></span></h2>
           <button class="btn btn-ghost btn-small" id="refreshBtn" style="margin-left:auto">↻ Refresh</button>
         </div>
-        <p class="sub">Changes go live on the site after GitHub Pages rebuilds (about a minute).</p>
+        <p class="sub">Changes go live on the site after Cloudflare redeploys (about a minute).</p>
         <div class="table-wrap">
           <table>
             <thead><tr><th></th><th>Game</th><th>Creator</th><th>Category</th><th></th></tr></thead>

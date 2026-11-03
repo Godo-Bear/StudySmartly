@@ -1,9 +1,22 @@
-// Cloudflare Workers config: serves this repo as a static site.
+// Cloudflare Workers config.
+// Static files are served from the repo root; /api/* runs src/worker.js.
+// Secrets (set in the Cloudflare dashboard, never in this file):
+//   ADMIN_CODE    - the code that unlocks the admin panel
+//   GITHUB_TOKEN  - GitHub token with Contents: Read and write on this repo
 {
   "name": "studysmartly",
+  "main": "src/worker.js",
   "compatibility_date": "2025-10-01",
   "assets": {
     "directory": "./",
-    "not_found_handling": "404-page"
-  }
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    "GITHUB_REPO": "Godo-Bear/StudySmartly",
+    "GITHUB_BRANCH": "main"
+  },
+  // keep the secrets set in the dashboard when this file is deployed
+  "keep_vars": true
 }

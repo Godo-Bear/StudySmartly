@@ -1,116 +1,48 @@
 // StudySmartly — admin panel
-// Reads and writes data/games.json in the GitHub repo via the GitHub REST API.
-// Every add/edit/delete becomes a commit on the configured branch (main).
+// Talks to the Cloudflare Worker at /api/*. The Worker checks the admin code
+// (ADMIN_CODE secret) and saves data/games.json to the main branch on GitHub.
 
 const $ = (id) => document.getElementById(id);
-const FILE_PATH = "data/games.json";
-const STORE_KEY = "ss-admin";
+const STORE_KEY = "ss-admin-code";
 
-let cfg = null;        // { owner, repo, branch, token }
+let adminCode = "";
 let games = [];
-let fileSha = null;    // needed by GitHub to update an existing file
 let editingId = null;
 
-/* ---------- Config / login ---------- */
-function guessRepo() {
-  // On GitHub Pages the URL is https://<owner>.github.io/<repo>/
-  const m = location.hostname.match(/^([^.]+)\.github\.io$/i);
-  if (m) return { owner: m[1], repo: location.pathname.split("/").filter(Boolean)[0] || `${m[1]}.github.io` };
-  return { owner: "Godo-Bear", repo: "StudySmartly" };
-}
-function loadCfg() {
+/* ---------- Remembering the code ---------- */
+function loadCode() {
   for (const store of [sessionStorage, localStorage]) {
     try {
-      const raw = store.getItem(STORE_KEY);
-      if (raw) return JSON.parse(raw);
+      const v = store.getItem(STORE_KEY);
+      if (v) return v;
     } catch {}
   }
-  return null;
+  return "";
 }
-function saveCfg(c, remember) {
-  try {
-    (remember ? localStorage : sessionStorage).setItem(STORE_KEY, JSON.stringify(c));
-  } catch {}
+function saveCode(code, remember) {
+  try { (remember ? localStorage : sessionStorage).setItem(STORE_KEY, code); } catch {}
 }
-function clearCfg() {
+function clearCode() {
   try { localStorage.removeItem(STORE_KEY); sessionStorage.removeItem(STORE_KEY); } catch {}
 }
 
-/* ---------- GitHub API ---------- */
-function b64encode(str) {
-  const bytes = new TextEncoder().encode(str);
-  let bin = "";
-  bytes.forEach((b) => (bin += String.fromCharCode(b)));
-  return btoa(bin);
-}
-function b64decode(b64) {
-  const bin = atob(b64.replace(/\s/g, ""));
-  return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
-}
-async function gh(path, opts = {}) {
-  const res = await fetch(`https://api.github.com/repos/${cfg.owner}/${cfg.repo}${path}`, {
+/* ---------- API ---------- */
+async function api(path, opts = {}) {
+  const res = await fetch(`/api${path}`, {
     ...opts,
     headers: {
-      Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${cfg.token}`,
-      "X-GitHub-Api-Version": "2022-11-28",
+      "X-Admin-Code": adminCode,
       ...(opts.body ? { "Content-Type": "application/json" } : {}),
     },
   });
+  let data = {};
+  try { data = await res.json(); } catch {}
   if (!res.ok) {
-    let msg = `${res.status}`;
-    try { msg = (await res.json()).message || msg; } catch {}
-    const err = new Error(msg);
+    const err = new Error(data.error || `Request failed (${res.status})`);
     err.status = res.status;
     throw err;
   }
-  return res.json();
-}
-
-async function checkAccess() {
-  const repo = await gh("");
-  if (!repo.permissions || !(repo.permissions.push || repo.permissions.admin)) {
-    throw new Error("This token can't write to the repo. Give it Contents: Read and write.");
-  }
-}
-
-async function fetchGames() {
-  try {
-    const file = await gh(`/contents/${FILE_PATH}?ref=${encodeURIComponent(cfg.branch)}`);
-    fileSha = file.sha;
-    const data = JSON.parse(b64decode(file.content));
-    games = Array.isArray(data) ? data : data.games || [];
-  } catch (err) {
-    if (err.status === 404) { games = []; fileSha = null; } else throw err;
-  }
-}
-
-async function commitGames(message) {
-  const body = {
-    message,
-    content: b64encode(JSON.stringify(games, null, 2) + "\n"),
-    branch: cfg.branch,
-    ...(fileSha ? { sha: fileSha } : {}),
-  };
-  const res = await gh(`/contents/${FILE_PATH}`, { method: "PUT", body: JSON.stringify(body) });
-  fileSha = res.content.sha;
-}
-
-// Re-read the latest file, apply a change, commit. Retries once if someone
-// else saved at the same moment (409 conflict).
-async function mutate(change, message) {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    await fetchGames();
-    const backup = JSON.parse(JSON.stringify(games));
-    change();
-    try {
-      await commitGames(message);
-      return;
-    } catch (err) {
-      games = backup;
-      if (err.status !== 409 || attempt === 1) throw err;
-    }
-  }
+  return data;
 }
 
 /* ---------- UI ---------- */
@@ -194,15 +126,25 @@ function startEdit(id) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+function handleAuthError(err) {
+  if (err.status === 401) {
+    clearCode();
+    toast("Admin code changed. Please unlock again.", true);
+    setTimeout(() => location.reload(), 1200);
+    return true;
+  }
+  return false;
+}
+
 async function refresh() {
   setBusy(true);
   setStatus("Loading games…");
   try {
-    await fetchGames();
+    games = (await api("/games")).games;
     renderTable();
-    setStatus(`Connected to ${cfg.owner}/${cfg.repo} · branch ${cfg.branch}`, "ok");
+    setStatus("Unlocked · saving to the main branch", "ok");
   } catch (err) {
-    setStatus(`Couldn't load games: ${err.message}`, "warn");
+    if (!handleAuthError(err)) setStatus(`Couldn't load games: ${err.message}`, "warn");
   } finally {
     setBusy(false);
   }
@@ -211,29 +153,25 @@ async function refresh() {
 /* ---------- Events ---------- */
 $("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  cfg = {
-    owner: $("ghOwner").value.trim(),
-    repo: $("ghRepo").value.trim(),
-    branch: $("ghBranch").value.trim() || "main",
-    token: $("ghToken").value.trim(),
-  };
+  adminCode = $("adminCode").value;
   $("loginBtn").disabled = true;
   $("loginBtn").textContent = "Checking…";
   try {
-    await checkAccess();
-    saveCfg(cfg, $("remember").checked);
+    await api("/login", { method: "POST" });
+    saveCode(adminCode, $("remember").checked);
     showDashboard();
   } catch (err) {
-    toast(err.status === 401 ? "That token isn't valid." : err.status === 404 ? "Repo not found (or token can't see it)." : err.message, true);
-    cfg = null;
+    adminCode = "";
+    $("adminCode").select();
+    toast(err.status === 404 ? "Admin API not found. Is the site running on Cloudflare?" : err.message, true);
   } finally {
     $("loginBtn").disabled = false;
-    $("loginBtn").textContent = "Sign in";
+    $("loginBtn").textContent = "Unlock";
   }
 });
 
 $("logoutBtn").addEventListener("click", () => {
-  clearCfg();
+  clearCode();
   location.reload();
 });
 
@@ -248,28 +186,23 @@ $("gameForm").addEventListener("submit", async (e) => {
   if (data.thumbnail && !safeURL(data.thumbnail)) return toast("The thumbnail must be an http(s) link", true);
 
   setBusy(true);
-  setStatus("Saving to GitHub…");
-  const id = editingId;
+  setStatus("Saving…");
   try {
-    if (id) {
-      await mutate(() => {
-        const g = games.find((x) => x.id === id);
-        if (!g) throw new Error("That game was deleted by someone else.");
-        Object.assign(g, data, { updatedAt: new Date().toISOString() });
-      }, `Update game: ${data.name}`);
+    if (editingId) {
+      games = (await api(`/games/${encodeURIComponent(editingId)}`, { method: "PUT", body: JSON.stringify(data) })).games;
       toast(`Saved “${data.name}”`);
     } else {
-      await mutate(() => {
-        games.push({ id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()), ...data, addedAt: new Date().toISOString() });
-      }, `Add game: ${data.name} by ${data.creator}`);
+      games = (await api("/games", { method: "POST", body: JSON.stringify(data) })).games;
       toast(`Added “${data.name}” 🎉`);
     }
     resetForm();
     renderTable();
-    setStatus(`Saved to ${cfg.branch}. Live on the site in about a minute.`, "ok");
+    setStatus("Saved to main. Live on the site in about a minute.", "ok");
   } catch (err) {
-    toast(`Save failed: ${err.message}`, true);
-    setStatus(`Save failed: ${err.message}`, "warn");
+    if (!handleAuthError(err)) {
+      toast(`Save failed: ${err.message}`, true);
+      setStatus(`Save failed: ${err.message}`, "warn");
+    }
   } finally {
     setBusy(false);
   }
@@ -288,14 +221,16 @@ $("gameRows").addEventListener("click", async (e) => {
   setBusy(true);
   setStatus("Deleting…");
   try {
-    await mutate(() => { games = games.filter((x) => String(x.id) !== id); }, `Remove game: ${g.name}`);
+    games = (await api(`/games/${encodeURIComponent(id)}`, { method: "DELETE" })).games;
     if (String(editingId) === id) resetForm();
     renderTable();
     toast(`Deleted “${g.name}”`);
-    setStatus(`Saved to ${cfg.branch}.`, "ok");
+    setStatus("Saved to main. Live on the site in about a minute.", "ok");
   } catch (err) {
-    toast(`Delete failed: ${err.message}`, true);
-    setStatus(`Delete failed: ${err.message}`, "warn");
+    if (!handleAuthError(err)) {
+      toast(`Delete failed: ${err.message}`, true);
+      setStatus(`Delete failed: ${err.message}`, "warn");
+    }
   } finally {
     setBusy(false);
   }
@@ -312,8 +247,5 @@ function showDashboard() {
 /* ---------- Boot ---------- */
 fillIcons();
 initTheme();
-const guess = guessRepo();
-$("ghOwner").value = guess.owner;
-$("ghRepo").value = guess.repo;
-cfg = loadCfg();
-if (cfg) showDashboard();
+adminCode = loadCode();
+if (adminCode) showDashboard();
