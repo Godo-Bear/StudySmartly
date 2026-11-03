@@ -41,7 +41,7 @@ function renderGrid() {
   if (!list.length) {
     $("grid").innerHTML = state.games.length
       ? `<div class="empty"><div class="big">🔍</div><h3>No games found</h3><p>Try a different search or category.</p></div>`
-      : `<div class="empty"><div class="big">🎮</div><h3>No games yet</h3><p>Admins can add the first game from the <a href="admin.html" style="color:var(--accent);font-weight:700">admin panel</a>.</p></div>`;
+      : `<div class="empty"><div class="big">🎮</div><h3>No games yet</h3><p>Be the first: <a href="create.html" style="color:var(--accent);font-weight:700">add your game</a>.</p></div>`;
     return;
   }
   $("grid").innerHTML = list.map((g) => cardHTML(g, state.user)).join("");
@@ -76,6 +76,7 @@ $("searchForm").addEventListener("submit", (e) => e.preventDefault());
   if (q) { state.query = q.trim(); $("searchInput").value = state.query; }
   [state.games, state.user] = await Promise.all([fetchGames(), loadMe()]);
   initAccount(state.user);
+  addCreateButton();
   renderStats();
   renderChips();
   renderGrid();

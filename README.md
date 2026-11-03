@@ -9,6 +9,17 @@ A modern game library for games made by me and my friends. Visitors browse, sear
 
 Thumbnails can be any picture or a PDF (its first page is used). They're shrunk to 512px in the browser and saved in `images/`.
 
+## Creators add their own games
+Anyone with an account can click the round **＋ Add your game** button in the bottom-right corner. It opens `create.html`, where creators publish a game themselves, with no admin needed. There are two ways:
+- **Link:** a game that's already online.
+- **Upload files:** a `.zip` of the game folder, a single `.html` file, or a whole folder.
+
+Uploaded files are stored in Cloudflare KV and served from `/games/<folder>/...`. They're served with a CSP `sandbox` header, so the game runs as a separate origin and can't read StudySmartly logins. Games that use `localStorage` still run, but their progress isn't saved between visits.
+
+The limits are 200 files, 20 MB per file, 40 MB per game and 25 games per creator. On the free plan, KV allows about 1,000 file writes a day.
+
+Under **My games**, creators can edit or delete their own games, and they can always play their own paid games. Admins can still edit or delete any game.
+
 ## Paid games
 Tick **"Needs to pay owner to own"** when adding a game. You can also add a price, such as "$2".
 

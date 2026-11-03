@@ -3,6 +3,9 @@
 // - /api/admin/*  admin panel. Unlocked with the ADMIN_CODE secret or by
 //   logging in with an account an admin has marked as admin. Saves
 //   data/games.json + thumbnails to main on GitHub using GITHUB_TOKEN.
+// - /api/my/*, /api/uploads/*  creators add, edit and delete their own games
+//   (a link, or uploaded game files that are stored in KV and served at
+//   /games/<id>/... in a sandbox so they can't touch the rest of the site).
 // - /api/auth/*, /api/me, /api/play/:id  player accounts and paid games.
 //   Accounts, sessions, unlocks and the links of paid games live in the DB
 //   (Cloudflare KV), never in the public repo.
@@ -13,10 +16,15 @@ const IMAGE_TYPES = { "image/webp": "webp", "image/png": "png", "image/jpeg": "j
 const MAX_IMAGE_BYTES = 1.5 * 1024 * 1024;
 const SESSION_TTL = 60 * 60 * 24 * 30; // 30 days
 const PBKDF2_ITERATIONS = 20000;       // fits the free plan's 10ms CPU limit
+const MAX_UPLOAD_FILES = 200;          // KV free plan: 1000 writes a day
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 40 * 1024 * 1024;
+const MAX_GAMES_PER_CREATOR = 25;
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/games/")) return serveGameFile(request, env, url).catch(() => new Response("Error", { status: 500 }));
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
 
     try {
@@ -77,11 +85,257 @@ async function handleApi(request, env, url) {
     if (!gameUrl) throw httpError(404, "That isn't a paid game.");
     const user = await currentUser(request, env);
     if (!user) throw httpError(401, "Log in to play this game.");
-    if (!user.admin && !user.unlocked.includes(play[1])) throw httpError(403, "This game hasn't been unlocked for your account yet.");
+    if (!user.admin && !user.unlocked.includes(play[1]) && !(await ownsGame(request, env, user, play[1]))) {
+      throw httpError(403, "This game hasn't been unlocked for your account yet.");
+    }
     return json({ url: gameUrl });
   }
 
+  if (path.startsWith("/api/my/") || path.startsWith("/api/uploads")) return handleCreator(request, env, url, path, method);
+
   return json({ error: "Not found" }, 404);
+}
+
+/* ---------- Creators: add / edit / delete their own games ---------- */
+async function handleCreator(request, env, url, path, method) {
+  const user = await currentUser(request, env);
+  if (!user) throw httpError(401, "Log in to add games.");
+  if (!env.GITHUB_TOKEN) throw httpError(503, "Adding games isn't set up yet (missing GITHUB_TOKEN).");
+  const isMine = (g) => g.owner && g.owner.toLowerCase() === user.username.toLowerCase();
+
+  // My games (with the private links of my paid games)
+  if (path === "/api/my/games" && method === "GET") {
+    const { games } = await readGames(env);
+    return json({ games: await withPrivateUrls(env, games.filter(isMine)) });
+  }
+
+  // 1. Reserve an upload: say which files are coming.
+  if (path === "/api/uploads" && method === "POST") {
+    const { files } = await request.json();
+    const list = checkFileList(files);
+    const id = crypto.randomUUID();
+    await env.DB.put(`upload:${id}`, JSON.stringify({ owner: user.username, files: list }), { expirationTtl: 60 * 60 * 24 });
+    return json({ id }, 201);
+  }
+
+  // 2. Send each file (raw bytes) to /api/uploads/<id>?path=<path>
+  const up = path.match(/^\/api\/uploads\/([\w-]+)$/);
+  if (up && method === "PUT") {
+    const upload = await getUpload(env, up[1], user);
+    const filePath = url.searchParams.get("path") || "";
+    if (!(filePath in upload.files)) throw httpError(400, "That file isn't part of this upload.");
+    const bytes = await request.arrayBuffer();
+    if (bytes.byteLength !== upload.files[filePath]) throw httpError(400, `${filePath} didn't upload completely. Try again.`);
+    await env.DB.put(`file:${up[1]}/${filePath}`, bytes, { metadata: { type: mimeFor(filePath) } });
+    return json({ ok: true });
+  }
+
+  // 3. Publish a game: a link, or a finished upload.
+  if (path === "/api/my/games" && method === "POST") {
+    const body = await request.json();
+    const { games: existing } = await readGames(env);
+    if (!user.admin && existing.filter(isMine).length >= MAX_GAMES_PER_CREATOR) {
+      throw httpError(400, `You can have up to ${MAX_GAMES_PER_CREATOR} games. Delete one to add another.`);
+    }
+    // The game's id is public; uploaded files live under a separate, secret
+    // folder id so a paid game's files can't be found from its public id.
+    const id = crypto.randomUUID();
+    const folder = String(body.uploadId || "");
+    if (folder) {
+      const upload = await getUpload(env, folder, user);
+      const entry = String(body.entry || "");
+      if (!(entry in upload.files) || !/\.html?$/i.test(entry)) throw httpError(400, "Pick the HTML file that starts the game.");
+      const stored = await env.DB.list({ prefix: `file:${folder}/` });
+      if (stored.keys.length < Object.keys(upload.files).length) throw httpError(400, "Some files didn't finish uploading. Try again.");
+      body.url = `/games/${folder}/${entry.split("/").map(encodeURIComponent).join("/")}`;
+    }
+    const data = clean({ ...body, creator: body.creator || user.username });
+    data.owner = user.username;
+    const image = checkImage(body.image);
+    const result = await createGame(env, id, data, image);
+    if (folder) await env.DB.delete(`upload:${folder}`);
+    return json({ game: result.game }, 201);
+  }
+
+  // Edit / delete one of my games
+  const mine = path.match(/^\/api\/my\/games\/([\w-]+)$/);
+  if (mine) {
+    const { games } = await readGames(env);
+    const game = games.find((g) => g.id === mine[1]);
+    if (!game) throw httpError(404, "That game no longer exists.");
+    if (!isMine(game)) throw httpError(403, "You can only change your own games.");
+    if (method === "PUT") {
+      const body = await request.json();
+      // Uploaded games keep their files; only the details change.
+      const privateUrl = game.paid ? await env.DB.get(`url:${game.id}`) : game.url;
+      if (String(privateUrl || "").startsWith("/games/")) body.url = privateUrl;
+      const data = clean({ ...body, creator: body.creator || user.username });
+      await updateGame(env, game.id, data, checkImage(body.image));
+      return json({ ok: true });
+    }
+    if (method === "DELETE") {
+      await removeGame(env, game.id);
+      return json({ ok: true });
+    }
+  }
+
+  return json({ error: "Not found" }, 404);
+}
+
+// Creators can always play their own paid games (checked against the live games list).
+async function ownsGame(request, env, user, id) {
+  try {
+    const res = await env.ASSETS.fetch(new Request(new URL("/data/games.json", request.url)));
+    const games = await res.json();
+    const g = (Array.isArray(games) ? games : []).find((x) => x.id === id);
+    return !!(g && g.owner && g.owner.toLowerCase() === user.username.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+async function getUpload(env, id, user) {
+  const raw = await env.DB.get(`upload:${id}`);
+  if (!raw) throw httpError(404, "That upload expired. Please upload the files again.");
+  const upload = JSON.parse(raw);
+  if (upload.owner !== user.username) throw httpError(403, "That isn't your upload.");
+  return upload;
+}
+
+// Validate the list of files a creator wants to upload.
+function checkFileList(files) {
+  if (!Array.isArray(files) || !files.length) throw httpError(400, "Pick your game's files.");
+  if (files.length > MAX_UPLOAD_FILES) throw httpError(400, `Games can have up to ${MAX_UPLOAD_FILES} files.`);
+  const list = {};
+  let total = 0;
+  for (const f of files) {
+    const p = String(f && f.path || "");
+    const size = Number(f && f.size);
+    if (!isSafePath(p)) throw httpError(400, `“${p.slice(0, 80)}” isn't an allowed file name.`);
+    if (!Number.isInteger(size) || size < 0 || size > MAX_FILE_BYTES) throw httpError(400, `${p} is too big (max 20 MB per file).`);
+    total += size;
+    list[p] = size;
+  }
+  if (total > MAX_UPLOAD_BYTES) throw httpError(400, "That game is too big (max 40 MB).");
+  if (!Object.keys(list).some((p) => /\.html?$/i.test(p))) throw httpError(400, "Your game needs an .html file.");
+  return list;
+}
+function isSafePath(p) {
+  return p.length > 0 && p.length <= 200 && !p.startsWith("/") && !p.includes("\\")
+    && p.split("/").every((part) => part && part !== "." && part !== "..")
+    && /^[\w\-. /@()+,'&!~\[\]]+$/.test(p);
+}
+
+/* ---------- Serving uploaded games ---------- */
+// Uploaded games are served with a CSP sandbox: they run as their own
+// separate origin, so their scripts can't read StudySmartly logins.
+const SANDBOX_CSP = "sandbox allow-scripts allow-forms allow-popups allow-modals allow-pointer-lock allow-downloads allow-orientation-lock allow-presentation";
+// Sandboxed pages can't use localStorage; give games an in-memory stand-in
+// so the ones that use it still run (progress just isn't saved).
+const STORAGE_SHIM = `<script>(function(){function m(){var d={};return{getItem:function(k){k=String(k);return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[String(k)]=String(v)},removeItem:function(k){delete d[String(k)]},clear:function(){d={}},key:function(i){return Object.keys(d)[i]||null},get length(){return Object.keys(d).length}}}["localStorage","sessionStorage"].forEach(function(n){try{window[n].getItem("x")}catch(e){try{Object.defineProperty(window,n,{value:m(),configurable:true})}catch(_){}}})})();</script>`;
+
+async function serveGameFile(request, env, url) {
+  const m = url.pathname.match(/^\/games\/([\w-]+)\/(.*)$/);
+  if (!m || !env.DB) return env.ASSETS.fetch(request);
+  let filePath;
+  try { filePath = decodeURIComponent(m[2]); } catch { return new Response("Bad path", { status: 400 }); }
+  if (filePath === "" || filePath.endsWith("/")) filePath += "index.html";
+  if (!isSafePath(filePath)) return new Response("Not found", { status: 404 });
+
+  const { value, metadata } = await env.DB.getWithMetadata(`file:${m[1]}/${filePath}`, "arrayBuffer");
+  if (!value) return new Response("Not found", { status: 404, headers: { "Content-Security-Policy": SANDBOX_CSP } });
+
+  const type = (metadata && metadata.type) || mimeFor(filePath);
+  const headers = {
+    "Content-Type": type,
+    "Content-Security-Policy": SANDBOX_CSP,
+    "X-Content-Type-Options": "nosniff",
+    "Cache-Control": "public, max-age=300",
+  };
+  if (type.startsWith("text/html")) {
+    let html = new TextDecoder().decode(value);
+    // Put the shim right after <!doctype> so the page doesn't drop into quirks mode.
+    html = html.replace(/^(\uFEFF?\s*<!doctype[^>]*>)?/i, (d) => (d || "") + STORAGE_SHIM);
+    return new Response(html, { headers });
+  }
+  return new Response(value, { headers });
+}
+
+const MIME = {
+  html: "text/html; charset=utf-8", htm: "text/html; charset=utf-8", js: "text/javascript; charset=utf-8",
+  mjs: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8", json: "application/json",
+  txt: "text/plain; charset=utf-8", xml: "application/xml", svg: "image/svg+xml", png: "image/png",
+  jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", ico: "image/x-icon",
+  bmp: "image/bmp", avif: "image/avif", mp3: "audio/mpeg", ogg: "audio/ogg", wav: "audio/wav", m4a: "audio/mp4",
+  mp4: "video/mp4", webm: "video/webm", woff: "font/woff", woff2: "font/woff2", ttf: "font/ttf", otf: "font/otf",
+  wasm: "application/wasm", data: "application/octet-stream", glb: "model/gltf-binary", gltf: "model/gltf+json",
+};
+function mimeFor(p) {
+  return MIME[(p.split(".").pop() || "").toLowerCase()] || "application/octet-stream";
+}
+
+async function deleteGameFiles(env, id) {
+  let cursor;
+  do {
+    const page = await env.DB.list({ prefix: `file:${id}/`, cursor });
+    await Promise.all(page.keys.map((k) => env.DB.delete(k.name)));
+    cursor = page.list_complete ? null : page.cursor;
+  } while (cursor);
+}
+
+/* ---------- Games: shared by the admin panel and creators ---------- */
+async function createGame(env, id, data, image) {
+  if (!image) throw httpError(400, "Please upload a thumbnail picture.");
+  data.thumbnail = await saveImage(env, id, image, data.name);
+  if (data.paid) {
+    await env.DB.put(`url:${id}`, data.url); // keep the link private
+    data.url = "";
+  }
+  const game = { id, ...data, addedAt: new Date().toISOString() };
+  const games = await mutate(env, (list) => {
+    if (list.some((g) => g.id === id)) throw httpError(409, "That game was already added.");
+    return [...list, game];
+  }, `Add game: ${game.name} by ${game.creator}`);
+  return { games, game };
+}
+
+async function updateGame(env, id, data, image) {
+  if (image) data.thumbnail = await saveImage(env, id, image, data.name);
+  if (data.paid) {
+    await env.DB.put(`url:${id}`, data.url);
+    data.url = "";
+  }
+  let oldThumb = "";
+  const games = await mutate(env, (list) => {
+    const g = list.find((x) => String(x.id) === id);
+    if (!g) throw httpError(404, "That game no longer exists.");
+    oldThumb = g.thumbnail || "";
+    Object.assign(g, data, { updatedAt: new Date().toISOString() });
+    if (!data.paid) delete g.paid;
+    if (!data.price) delete g.price;
+    return list;
+  }, `Update game: ${data.name}`);
+  if (!data.paid) await env.DB.delete(`url:${id}`); // now free: link is public again
+  if (image && oldThumb !== data.thumbnail) await deleteImage(env, oldThumb);
+  return games;
+}
+
+async function removeGame(env, id) {
+  let removed = "", thumb = "", link = "";
+  const games = await mutate(env, (list) => {
+    const g = list.find((x) => String(x.id) === id);
+    if (!g) throw httpError(404, "That game no longer exists.");
+    removed = g.name;
+    thumb = g.thumbnail || "";
+    link = g.url || "";
+    return list.filter((x) => x !== g);
+  }, () => `Remove game: ${removed}`);
+  link = (await env.DB.get(`url:${id}`)) || link;
+  await env.DB.delete(`url:${id}`);
+  await deleteImage(env, thumb);
+  const folder = link.match(/^\/games\/([\w-]+)\//);
+  if (folder) await deleteGameFiles(env, folder[1]);
+  return games;
 }
 
 /* ---------- Admin API ---------- */
@@ -113,60 +367,19 @@ async function handleAdmin(request, env, path, method) {
 
   if (path === "/api/admin/games" && method === "POST") {
     const body = await request.json();
-    const data = clean(body);
-    const image = checkImage(body.image);
-    if (!image) throw httpError(400, "Please upload a thumbnail picture.");
-    const id = crypto.randomUUID();
-    data.thumbnail = await saveImage(env, id, image, data.name);
-    const realUrl = data.url;
-    if (data.paid) {
-      await env.DB.put(`url:${id}`, realUrl); // keep the link private
-      data.url = "";
-    }
-    const game = { id, ...data, addedAt: new Date().toISOString() };
-    const games = await mutate(env, (list) => [...list, game], `Add game: ${game.name} by ${game.creator}`);
+    const { games, game } = await createGame(env, crypto.randomUUID(), clean(body), checkImage(body.image));
     return json({ games: await withPrivateUrls(env, games), game }, 201);
   }
 
   const m = path.match(/^\/api\/admin\/games\/([\w-]+)$/);
   if (m && method === "PUT") {
-    const id = m[1];
     const body = await request.json();
-    const data = clean(body);
-    const image = checkImage(body.image);
-    if (image) data.thumbnail = await saveImage(env, id, image, data.name);
-    const realUrl = data.url;
-    if (data.paid) {
-      await env.DB.put(`url:${id}`, realUrl);
-      data.url = "";
-    }
-    let oldThumb = "";
-    const games = await mutate(env, (list) => {
-      const g = list.find((x) => String(x.id) === id);
-      if (!g) throw httpError(404, "That game no longer exists.");
-      oldThumb = g.thumbnail || "";
-      Object.assign(g, data, { updatedAt: new Date().toISOString() });
-      if (!data.paid) delete g.paid;
-      if (!data.price) delete g.price;
-      return list;
-    }, `Update game: ${data.name}`);
-    if (!data.paid) await env.DB.delete(`url:${id}`); // now free: link is public again
-    if (image && oldThumb !== data.thumbnail) await deleteImage(env, oldThumb);
+    const games = await updateGame(env, m[1], clean(body), checkImage(body.image));
     return json({ games: await withPrivateUrls(env, games) });
   }
 
   if (m && method === "DELETE") {
-    const id = m[1];
-    let removed = "", thumb = "";
-    const games = await mutate(env, (list) => {
-      const g = list.find((x) => String(x.id) === id);
-      if (!g) throw httpError(404, "That game no longer exists.");
-      removed = g.name;
-      thumb = g.thumbnail || "";
-      return list.filter((x) => x !== g);
-    }, () => `Remove game: ${removed}`);
-    await env.DB.delete(`url:${id}`);
-    await deleteImage(env, thumb);
+    const games = await removeGame(env, m[1]);
     return json({ games: await withPrivateUrls(env, games) });
   }
 
@@ -295,7 +508,7 @@ function clean(body) {
   if (!data.paid) delete data.paid;
   if (!data.paid || !data.price) delete data.price;
   if (!data.name || !data.creator || !data.url) throw httpError(400, "Name, creator and link are required.");
-  if (!isHttp(data.url)) throw httpError(400, "The game link must start with http:// or https://");
+  if (!isHttp(data.url) && !/^\/games\/[\w-]+\/\S+$/.test(data.url)) throw httpError(400, "The game link must start with http:// or https://");
   return data;
 }
 function isHttp(u) {

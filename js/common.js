@@ -130,8 +130,12 @@ function playURL(game) {
   return `play.html?id=${encodeURIComponent(game.id)}`;
 }
 
+function isOwner(g, user) {
+  return !!(g.owner && user && g.owner.toLowerCase() === user.username.toLowerCase());
+}
+
 function cardHTML(g, user) {
-  const owned = g.paid && user && (user.admin || user.unlocked.includes(g.id));
+  const owned = g.paid && user && (user.admin || user.unlocked.includes(g.id) || isOwner(g, user));
   return `
     <a class="card" href="${playURL(g)}" aria-label="Play ${escapeHTML(g.name)}">
       <div class="thumb">
@@ -217,6 +221,15 @@ function initAccount(user) {
   document.getElementById("accountBtn").addEventListener("click", (e) => { e.stopPropagation(); dd.classList.toggle("hidden"); });
   document.addEventListener("click", (e) => { if (!dd.contains(e.target)) dd.classList.add("hidden"); });
   document.getElementById("logoutUserBtn").addEventListener("click", logOut);
+}
+
+// Round "+" button in the bottom-right corner that opens the Create page.
+function addCreateButton() {
+  if (document.querySelector(".fab")) return;
+  document.body.insertAdjacentHTML("beforeend", `
+    <a class="fab" href="create.html" aria-label="Add your game">
+      <span class="fab-plus">${ICONS.plus}</span><span class="fab-label">Add your game</span>
+    </a>`);
 }
 
 async function logOut() {

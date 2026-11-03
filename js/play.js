@@ -27,7 +27,7 @@ function render(games) {
   $("gameTitle").textContent = game.name;
   $("gameSub").innerHTML = `by ${escapeHTML(game.creator || "Unknown")}
     ${game.category ? `<span class="pill">${escapeHTML(game.category)}</span>` : ""}
-    ${game.paid ? `<span class="price-tag">${user && (user.admin || user.unlocked.includes(game.id)) ? "✓ Owned" : `🔒 Paid${game.price ? ` · ${escapeHTML(game.price)}` : ""}`}</span>` : ""}`;
+    ${game.paid ? `<span class="price-tag">${user && (user.admin || user.unlocked.includes(game.id) || isOwner(game, user)) ? "✓ Owned" : `🔒 Paid${game.price ? ` · ${escapeHTML(game.price)}` : ""}`}</span>` : ""}`;
   if (game.paid) renderLock();
   if (game.description) $("gameDesc").textContent = game.description;
   else $("aboutPanel").classList.add("hidden");
@@ -43,7 +43,7 @@ function render(games) {
 
 // Paid games: show who to pay and what to do instead of the Play button.
 function renderLock() {
-  if (user && (user.admin || user.unlocked.includes(game.id))) return; // owned: normal Play button
+  if (user && (user.admin || user.unlocked.includes(game.id) || isOwner(game, user))) return; // owned: normal Play button
   playable = false;
   const owner = escapeHTML(game.creator || "the owner");
   const price = game.price ? ` <b>${escapeHTML(game.price)}</b>` : "";
@@ -139,5 +139,6 @@ $("shareBtn").addEventListener("click", async () => {
   const [games, me] = await Promise.all([fetchGames(), loadMe()]);
   user = me;
   initAccount(user);
+  addCreateButton();
   render(games);
 })();
