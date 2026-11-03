@@ -25,8 +25,9 @@
     "creator": "Jayden Narayan",
     "url": "https://echo-game.jn-studios.workers.dev/",
     "category": "Puzzle",
-    "description": "Puzzle game",
+    "description": "Puzzle game where you try and get to the finish line by using your shadows",
     "thumbnail": "images/445ab0c9-7e49-4f60-b896-3b8909940a4d-mw0bcsez.webp",
-    "addedAt": "2026-11-03T06:35:19.245Z"
+    "addedAt": "2026-11-03T06:35:19.245Z",
+    "updatedAt": "2026-11-03T06:36:29.499Z"
   }
 ]
