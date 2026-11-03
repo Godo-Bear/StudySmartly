@@ -1,45 +1,71 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#7b5cff"/>
-      <stop offset="0.55" stop-color="#6c5ce7"/>
-      <stop offset="1" stop-color="#00b8ff"/>
+      <stop offset="0" stop-color="#10c9a0"/>
+      <stop offset="0.5" stop-color="#14a6e0"/>
+      <stop offset="1" stop-color="#5b5ce8"/>
     </linearGradient>
-    <radialGradient id="glow" cx="0.78" cy="0.18" r="0.6">
-      <stop offset="0" stop-color="#5fe3ff" stop-opacity="0.75"/>
-      <stop offset="1" stop-color="#5fe3ff" stop-opacity="0"/>
+    <radialGradient id="glow" cx="0.2" cy="0.12" r="0.65">
+      <stop offset="0" stop-color="#b8fff0" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#b8fff0" stop-opacity="0"/>
     </radialGradient>
-    <radialGradient id="glow2" cx="0.12" cy="0.95" r="0.55">
-      <stop offset="0" stop-color="#ff6bcb" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#ff6bcb" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="pad" x1="0" y1="0" x2="0" y2="1">
+    <linearGradient id="pageL" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#e9ecff"/>
+      <stop offset="1" stop-color="#e6ebff"/>
+    </linearGradient>
+    <linearGradient id="pageR" x1="1" y1="0" x2="0" y2="0">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e6ebff"/>
     </linearGradient>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
-      <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#1a0f5c" flood-opacity="0.35"/>
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#062a4d" flood-opacity="0.35"/>
     </filter>
   </defs>
+
   <!-- full-bleed square: phones round the corners themselves -->
   <rect width="512" height="512" fill="url(#bg)"/>
   <rect width="512" height="512" fill="url(#glow)"/>
-  <rect width="512" height="512" fill="url(#glow2)"/>
-  <!-- sparkle -->
-  <path d="M398 92 l10 26 26 10 -26 10 -10 26 -10 -26 -26 -10 26 -10z" fill="#fff" opacity="0.9"/>
-  <circle cx="122" cy="120" r="9" fill="#fff" opacity="0.55"/>
-  <!-- game controller -->
+
+  <g id="fg">
+  <!-- sparkles -->
+  <path d="M420 70 l9 23 23 9 -23 9 -9 23 -9 -23 -23 -9 23 -9z" fill="#fff" opacity="0.9"/>
+  <path d="M84 196 l6 15 15 6 -15 6 -6 15 -6 -15 -15 -6 15 -6z" fill="#fff" opacity="0.7"/>
+  <circle cx="436" cy="318" r="7" fill="#fff" opacity="0.5"/>
+
+  <!-- open book (its pages are the controller) -->
   <g filter="url(#shadow)">
-    <path fill="url(#pad)" d="M168 176h176c52 0 86 34 96 86l14 72c8 42-16 72-48 72-22 0-36-12-48-30l-18-28H172l-18 28c-12 18-26 30-48 30-32 0-56-30-48-72l14-72c10-52 44-86 96-86z"/>
+    <!-- cover -->
+    <path d="M70 262 C130 240 206 244 256 272 C306 244 382 240 442 262 L442 430 C382 410 306 414 256 444 C206 414 130 410 70 430 Z" fill="#1f2a6b"/>
+    <!-- page edges -->
+    <path d="M84 254 C138 236 210 240 256 266 L256 428 C210 402 138 398 84 414 Z" fill="#c9d3f5"/>
+    <path d="M428 254 C374 236 302 240 256 266 L256 428 C302 402 374 398 428 414 Z" fill="#c9d3f5"/>
+    <!-- pages -->
+    <path d="M92 244 C142 226 212 230 256 256 L256 418 C212 392 142 388 92 404 Z" fill="url(#pageL)"/>
+    <path d="M420 244 C370 226 300 230 256 256 L256 418 C300 392 370 388 420 404 Z" fill="url(#pageR)"/>
+    <!-- spine -->
+    <path d="M256 256 L256 418" stroke="#b7c2ee" stroke-width="4"/>
   </g>
-  <!-- d-pad -->
-  <rect x="146" y="238" width="24" height="76" rx="7" fill="#6c5ce7"/>
-  <rect x="120" y="264" width="76" height="24" rx="7" fill="#6c5ce7"/>
-  <!-- buttons -->
-  <circle cx="344" cy="248" r="17" fill="#ff4d8d"/>
-  <circle cx="384" cy="286" r="17" fill="#00b8ff"/>
-  <circle cx="304" cy="286" r="17" fill="#22c55e"/>
-  <circle cx="344" cy="324" r="17" fill="#f5a524"/>
-  <!-- center -->
-  <rect x="226" y="222" width="60" height="14" rx="7" fill="#c9cdf0"/>
+  <!-- writing on the pages -->
+  <g>
+    <path d="M120 292 C160 284 200 286 232 300" stroke="#aab6e8" stroke-width="9" stroke-linecap="round" fill="none"/>
+    <path d="M120 322 C160 314 200 316 232 330" stroke="#aab6e8" stroke-width="9" stroke-linecap="round" fill="none"/>
+    <path d="M120 352 C160 344 200 346 232 360" stroke="#aab6e8" stroke-width="9" stroke-linecap="round" fill="none"/>
+    <path d="M120 382 C146 376 168 377 190 384" stroke="#aab6e8" stroke-width="9" stroke-linecap="round" fill="none"/>
+    <path d="M280 300 C312 286 352 284 392 292" stroke="#aab6e8" stroke-width="9" stroke-linecap="round" fill="none"/>
+    <path d="M280 330 C312 316 352 314 392 322" stroke="#aab6e8" stroke-width="9" stroke-linecap="round" fill="none"/>
+    <path d="M280 360 C312 346 352 344 392 352" stroke="#aab6e8" stroke-width="9" stroke-linecap="round" fill="none"/>
+    <path d="M322 384 C344 377 366 376 392 382" stroke="#aab6e8" stroke-width="9" stroke-linecap="round" fill="none"/>
+  </g>
+
+  <!-- graduation cap -->
+  <g filter="url(#shadow)">
+    <path d="M178 160 L178 206 C178 226 334 226 334 206 L334 160 Z" fill="#141b4d"/>
+    <path d="M256 74 L404 136 L256 198 L108 136 Z" fill="#1f2a6b"/>
+    <path d="M256 74 L404 136 L256 150 L108 136 Z" fill="#2c3a8c" opacity="0.6"/>
+    <!-- tassel -->
+    <path d="M256 136 L372 150 L372 206" stroke="#ffc83d" stroke-width="7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="256" cy="136" r="9" fill="#ffc83d"/>
+    <path d="M362 204 h20 l5 32 h-30 z" fill="#ffc83d"/>
+  </g>
+  </g>
 </svg>
