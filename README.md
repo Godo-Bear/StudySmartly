@@ -8,6 +8,8 @@ A modern game library for games made by me and my friends. Visitors browse, sear
 - **Sidebar** (on every main page): Home, each game type with its count, Creators and Add your game. On computers it's a slim strip of icons that slides open when you hover over it. On phones it opens from the ☰ button.
 - **🔥 Most Played** (top of the home page): the most played games, ranked. Plays are counted when someone presses Play, once per visitor per game every 30 minutes. A Durable Object (`PlayCounter`, SQLite-backed, on the free plan) does the counting.
 
+**App icon:** the `icons/` folder holds the home-screen icon (iPhone `apple-touch-icon.png`, plus Android/Chrome sizes). `manifest.webmanifest` makes "Add to Home Screen" open StudySmartly like an app. To change the icon, edit `icons/icon-source.svg` and re-export the PNGs.
+
 **Live site:** https://studysmartly.jn-studios.workers.dev
 - **`play.html`**: plays the game inside StudySmartly, with Fullscreen and Share buttons and more games underneath.
 - **`admin.html`**: the admin panel. Add a game with its **name, creator, link and a thumbnail picture**, plus an optional category and description. You can also edit or delete games.

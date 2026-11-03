@@ -9,3 +9,4 @@ src
 .dev.vars
 .gitignore
 images/.gitkeep
+icons/icon-source.svg
