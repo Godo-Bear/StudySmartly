@@ -73,17 +73,26 @@
           <div class="field">
             <label>Thumbnail <span class="req" id="thumbReq">*</span></label>
             <label class="upload" id="uploadBox">
-              <input id="fThumbFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif">
+              <input id="fThumbFile" type="file" accept="image/*,application/pdf,.pdf">
               <div class="upload-thumb" id="uploadThumb">🖼️</div>
               <div class="upload-text">
                 <b id="uploadLabel">Upload a picture</b>
-                <span id="uploadHint">PNG, JPG, WebP or GIF · click or drag it here</span>
+                <span id="uploadHint">Any picture or a PDF · click or drag it here</span>
               </div>
             </label>
           </div>
           <div class="field">
             <label for="fDesc">Description</label>
             <textarea id="fDesc" maxlength="400" placeholder="What's the game about? How do you play?"></textarea>
+          </div>
+          <label class="check-row">
+            <input type="checkbox" id="fPaid">
+            <span>🔒 Needs to pay owner to own
+              <small>Players must pay the creator, then an admin unlocks it for their account.</small></span>
+          </label>
+          <div class="field hidden" id="priceField">
+            <label for="fPrice">Price</label>
+            <input id="fPrice" maxlength="30" placeholder="e.g. $2 (optional)">
           </div>
           <div class="actions">
             <button class="btn btn-primary" type="submit" id="saveBtn">Add game</button>
@@ -93,6 +102,7 @@
         <div class="card preview-card" id="preview"></div>
       </div>
 
+      <div style="display:flex;flex-direction:column;gap:28px;min-width:0">
       <div class="panel">
         <div class="status" id="status"><span class="dot"></span><span id="statusText">Connecting…</span></div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
@@ -106,6 +116,19 @@
             <tbody id="gameRows"></tbody>
           </table>
         </div>
+      </div>
+
+      <div class="panel">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <h2 style="margin:0">Player accounts <span id="userCount" style="color:var(--muted);font-weight:600"></span></h2>
+          <button class="btn btn-ghost btn-small" id="refreshUsersBtn" style="margin-left:auto">↻ Refresh</button>
+        </div>
+        <p class="sub">When someone pays a game's owner, unlock that game for their account here. Unlocks work right away.</p>
+        <div class="field" style="margin-bottom:4px">
+          <input id="userSearch" type="search" placeholder="Search usernames…" autocomplete="off">
+        </div>
+        <div id="userRows"></div>
+      </div>
       </div>
     </div>
   </main>

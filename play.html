@@ -24,6 +24,7 @@
           <button type="submit" aria-label="Search" data-icon="search"></button>
         </form>
         <button class="icon-btn" data-theme-toggle aria-label="Toggle dark mode"></button>
+        <div id="accountSlot"></div>
       </div>
     </div>
   </header>
@@ -38,14 +39,14 @@
     <div id="playView" class="hidden">
       <div class="player" id="player">
         <!-- Cover shown until the user presses Play -->
-        <button class="player-cover" id="cover" aria-label="Start game">
+        <div class="player-cover" id="cover" role="button" tabindex="0" aria-label="Start game">
           <div class="cover-bg" id="coverBg"></div>
           <div class="cover-content">
             <div class="cover-thumb" id="coverThumb"></div>
             <div class="cover-title" id="coverTitle"></div>
             <span class="cover-play"><span data-icon="play"></span> Play</span>
           </div>
-        </button>
+        </div>
         <iframe id="frame" title="Game" class="hidden"
           allow="fullscreen; autoplay; gamepad; clipboard-write; pointer-lock"
           allowfullscreen referrerpolicy="no-referrer-when-downgrade"></iframe>

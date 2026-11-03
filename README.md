@@ -7,11 +7,25 @@ A modern game library for games made by me and my friends. Visitors browse, sear
 - **`play.html`**: plays the game inside StudySmartly, with Fullscreen and Share buttons and more games underneath.
 - **`admin.html`**: the admin panel. Add a game with its **name, creator, link and a thumbnail picture**, plus an optional category and description. You can also edit or delete games.
 
-Uploaded thumbnails are shrunk to 512px in the browser and saved in `images/`.
+Thumbnails can be any picture or a PDF (its first page is used). They're shrunk to 512px in the browser and saved in `images/`.
+
+## Paid games
+Tick **"Needs to pay owner to own"** when adding a game. You can also add a price, such as "$2".
+
+How a player gets a paid game:
+1. The player makes an account with the **Log in** button.
+2. They pay the game's owner however you like, such as cash or PayPal, and tell the owner their username.
+3. An admin unlocks the game for that username under **Player accounts** in the admin panel.
+
+Paid games' links are never put in the public `games.json`. The Worker only gives the link to accounts the game is unlocked for.
+
+Accounts, logins, unlocks and paid-game links are stored in Cloudflare KV (the `DB` binding). Cloudflare creates this storage automatically on deploy.
 
 All games live in [`data/games.json`](data/games.json) on the **`main`** branch.
 
 ## Hosting (Cloudflare Workers)
+`/api/admin/*` is the admin API, which needs the admin code. `/api/auth/*`, `/api/me` and `/api/play/:id` handle player accounts.
+
 The site runs on Cloudflare. `wrangler.jsonc` serves the static files, and `src/worker.js` handles the admin API at `/api/*`. Every push to `main` redeploys the site.
 
 ## Admin panel

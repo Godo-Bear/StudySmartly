@@ -105,7 +105,7 @@ function toast(msg, isError = false) {
   el.classList.toggle("error", isError);
   el.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), 3200);
+  toastTimer = setTimeout(() => el.classList.remove("show"), isError ? 6000 : 3200);
 }
 
 // Apply theme ASAP to avoid a flash.
@@ -118,7 +118,7 @@ async function fetchGames() {
     if (!res.ok) throw new Error(res.status);
     const data = await res.json();
     return (Array.isArray(data) ? data : data.games || [])
-      .filter((g) => g && g.name && g.url)
+      .filter((g) => g && g.name && (g.url || g.paid))
       .sort((a, b) => new Date(b.addedAt || 0) - new Date(a.addedAt || 0));
   } catch (err) {
     console.error("Could not load games.json", err);
@@ -130,13 +130,15 @@ function playURL(game) {
   return `play.html?id=${encodeURIComponent(game.id)}`;
 }
 
-function cardHTML(g) {
+function cardHTML(g, user) {
+  const owned = g.paid && user && user.unlocked.includes(g.id);
   return `
     <a class="card" href="${playURL(g)}" aria-label="Play ${escapeHTML(g.name)}">
       <div class="thumb">
         ${thumbHTML(g)}
         ${g.category ? `<span class="badge">${escapeHTML(g.category)}</span>` : ""}
         ${isNew(g) ? `<span class="badge new">NEW</span>` : ""}
+        ${g.paid ? `<span class="badge lock ${owned ? "owned" : ""}">${owned ? "✓ Owned" : `🔒 Paid${g.price ? ` · ${escapeHTML(g.price)}` : ""}`}</span>` : ""}
         <div class="play-overlay"><span>${ICONS.play}</span></div>
       </div>
       <div class="card-body">
@@ -144,4 +146,140 @@ function cardHTML(g) {
         <div class="card-creator">by ${escapeHTML(g.creator || "Unknown")}</div>
       </div>
     </a>`;
+}
+
+/* ---------- Player accounts ---------- */
+const TOKEN_KEY = "ss-token";
+function getToken() {
+  try { return localStorage.getItem(TOKEN_KEY) || ""; } catch { return ""; }
+}
+function setToken(token) {
+  try { token ? localStorage.setItem(TOKEN_KEY, token) : localStorage.removeItem(TOKEN_KEY); } catch {}
+}
+async function userApi(path, opts = {}) {
+  const token = getToken();
+  const res = await fetch(`/api${path}`, {
+    ...opts,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(opts.body ? { "Content-Type": "application/json" } : {}),
+    },
+  });
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+// Returns the logged-in user, or null.
+async function loadMe() {
+  if (!getToken()) return null;
+  try {
+    return (await userApi("/me")).user;
+  } catch (err) {
+    if (err.status === 401) setToken("");
+    return null;
+  }
+}
+
+// Header button + login/sign-up dialog. Call once per page.
+function initAccount(user) {
+  const slot = document.getElementById("accountSlot");
+  if (!slot) return;
+  if (user) {
+    slot.innerHTML = `
+      <div class="account-menu">
+        <button class="account-btn" id="accountBtn" aria-haspopup="true">
+          <span class="avatar" style="background:${gradientFor(user.username)}">${escapeHTML(user.username[0].toUpperCase())}</span>
+          <span class="account-name">${escapeHTML(user.username)}</span>
+        </button>
+        <div class="account-dropdown hidden" id="accountDropdown">
+          <div class="dd-head">Signed in as<br><b>${escapeHTML(user.username)}</b></div>
+          <div class="dd-sub">${user.unlocked.length} paid game${user.unlocked.length === 1 ? "" : "s"} unlocked</div>
+          <button class="btn btn-ghost btn-small" id="logoutUserBtn" style="width:100%">Log out</button>
+        </div>
+      </div>`;
+    const dd = document.getElementById("accountDropdown");
+    document.getElementById("accountBtn").addEventListener("click", (e) => { e.stopPropagation(); dd.classList.toggle("hidden"); });
+    document.addEventListener("click", (e) => { if (!dd.contains(e.target)) dd.classList.add("hidden"); });
+    document.getElementById("logoutUserBtn").addEventListener("click", async () => {
+      try { await userApi("/auth/logout", { method: "POST" }); } catch {}
+      setToken("");
+      location.reload();
+    });
+  } else {
+    slot.innerHTML = `<button class="btn btn-primary login-btn" data-open-auth="login">Log in</button>`;
+  }
+
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="modal-backdrop" id="authModal" aria-hidden="true">
+      <div class="auth-box" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+        <button class="modal-close" data-close-auth aria-label="Close">×</button>
+        <div class="auth-tabs">
+          <button data-auth-tab="login">Log in</button>
+          <button data-auth-tab="signup">Sign up</button>
+        </div>
+        <h2 id="authTitle"></h2>
+        <p class="sub" id="authSub"></p>
+        <form id="authForm">
+          <div class="field"><label for="authUser">Username</label>
+            <input id="authUser" autocomplete="username" required maxlength="20" pattern="[A-Za-z0-9_]{3,20}" title="3-20 letters, numbers or _"></div>
+          <div class="field"><label for="authPass">Password</label>
+            <input id="authPass" type="password" required minlength="6" maxlength="200"></div>
+          <button class="btn btn-primary" style="width:100%" id="authSubmit" type="submit"></button>
+        </form>
+      </div>
+    </div>`);
+
+  const modal = document.getElementById("authModal");
+  let mode = "login";
+  const setMode = (m) => {
+    mode = m;
+    document.querySelectorAll("[data-auth-tab]").forEach((b) => b.classList.toggle("active", b.dataset.authTab === m));
+    document.getElementById("authTitle").textContent = m === "login" ? "Welcome back 👋" : "Create your account";
+    document.getElementById("authSub").textContent = m === "login"
+      ? "Log in to play the paid games you own."
+      : "Free to make. You need one to own paid games.";
+    document.getElementById("authSubmit").textContent = m === "login" ? "Log in" : "Sign up";
+    document.getElementById("authPass").autocomplete = m === "login" ? "current-password" : "new-password";
+  };
+  const open = (m) => {
+    setMode(m);
+    modal.classList.add("open");
+    modal.setAttribute("aria-hidden", "false");
+    document.getElementById("authUser").focus();
+  };
+  const close = () => { modal.classList.remove("open"); modal.setAttribute("aria-hidden", "true"); };
+
+  document.addEventListener("click", (e) => {
+    const opener = e.target.closest("[data-open-auth]");
+    if (opener) open(opener.dataset.openAuth);
+    const tab = e.target.closest("[data-auth-tab]");
+    if (tab) setMode(tab.dataset.authTab);
+    if (e.target.closest("[data-close-auth]") || e.target === modal) close();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+
+  document.getElementById("authForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById("authSubmit");
+    btn.disabled = true;
+    try {
+      const { token } = await userApi(`/auth/${mode}`, {
+        method: "POST",
+        body: JSON.stringify({
+          username: document.getElementById("authUser").value.trim(),
+          password: document.getElementById("authPass").value,
+        }),
+      });
+      setToken(token);
+      location.reload();
+    } catch (err) {
+      toast(err.status === 404 ? "Accounts only work on the live site." : err.message, true);
+      btn.disabled = false;
+    }
+  });
 }

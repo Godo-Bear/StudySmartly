@@ -18,5 +18,8 @@
     "GITHUB_BRANCH": "main"
   },
   // keep the secrets set in the dashboard when this file is deployed
-  "keep_vars": true
+  "keep_vars": true,
+  // Private storage for player accounts, sessions, unlocks and paid-game links.
+  // No id needed: Cloudflare creates the namespace on the first deploy.
+  "kv_namespaces": [{ "binding": "DB" }]
 }

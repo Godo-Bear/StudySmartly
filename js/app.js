@@ -1,6 +1,6 @@
 // StudySmartly — home page game library
 
-const state = { games: [], category: "All", query: "" };
+const state = { games: [], category: "All", query: "", user: null };
 const $ = (id) => document.getElementById(id);
 
 function categories() {
@@ -44,7 +44,7 @@ function renderGrid() {
       : `<div class="empty"><div class="big">🎮</div><h3>No games yet</h3><p>Admins can add the first game from the <a href="admin.html" style="color:var(--accent);font-weight:700">admin panel</a>.</p></div>`;
     return;
   }
-  $("grid").innerHTML = list.map(cardHTML).join("");
+  $("grid").innerHTML = list.map((g) => cardHTML(g, state.user)).join("");
 }
 
 function renderStats() {
@@ -74,7 +74,8 @@ $("searchForm").addEventListener("submit", (e) => e.preventDefault());
   // Searches submitted from the play page arrive as ?q=
   const q = new URLSearchParams(location.search).get("q");
   if (q) { state.query = q.trim(); $("searchInput").value = state.query; }
-  state.games = await fetchGames();
+  [state.games, state.user] = await Promise.all([fetchGames(), loadMe()]);
+  initAccount(state.user);
   renderStats();
   renderChips();
   renderGrid();

@@ -8,6 +8,7 @@ const STORE_KEY = "ss-admin-code";
 let adminCode = "";
 let games = [];
 let editingId = null;
+let users = null; // null until loaded
 const recentImages = {}; // id -> dataURL, so new pictures show before the site redeploys
 let pendingImage = null; // { dataURL, base64, type } of a newly picked thumbnail
 
@@ -30,7 +31,7 @@ function clearCode() {
 
 /* ---------- API ---------- */
 async function api(path, opts = {}) {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`/api/admin${path}`, {
     ...opts,
     headers: {
       "X-Admin-Code": adminCode,
@@ -52,6 +53,11 @@ function setStatus(text, kind = "") {
   $("status").className = `status ${kind}`;
   $("statusText").textContent = text;
 }
+// Errors go in the status bar too, so they don't vanish with the toast.
+function showError(msg) {
+  toast(msg, true);
+  if (!$("dashView").classList.contains("hidden")) setStatus(msg, "warn");
+}
 function setBusy(busy) {
   ["saveBtn", "refreshBtn"].forEach((id) => ($(id).disabled = busy));
   document.querySelectorAll("#gameRows button").forEach((b) => (b.disabled = busy));
@@ -64,7 +70,7 @@ function renderTable() {
     ? sorted.map((g) => `
       <tr>
         <td><div class="mini-thumb">${thumbHTML({ ...g, thumbnail: recentImages[g.id] || g.thumbnail })}</div></td>
-        <td><div class="name">${escapeHTML(g.name)}</div><div class="url"><a href="${escapeHTML(safeURL(g.url))}" target="_blank" rel="noopener">${escapeHTML(g.url)}</a></div></td>
+        <td><div class="name">${escapeHTML(g.name)}${g.paid ? ` <span class="price-tag" style="font-size:11px">🔒 Paid${g.price ? ` · ${escapeHTML(g.price)}` : ""}</span>` : ""}</div><div class="url"><a href="${escapeHTML(safeURL(g.url))}" target="_blank" rel="noopener">${escapeHTML(g.url)}</a></div></td>
         <td>${escapeHTML(g.creator)}</td>
         <td>${escapeHTML(g.category || "—")}</td>
         <td><div class="row-actions">
@@ -78,6 +84,7 @@ function renderTable() {
   $("creatorList").innerHTML = uniq("creator").map((c) => `<option value="${escapeHTML(c)}">`).join("");
   $("categoryList").innerHTML = [...new Set([...uniq("category"), "Action", "Puzzle", "Racing", "Platformer", "Shooting", "Multiplayer", "Skill", "Strategy"])]
     .map((c) => `<option value="${escapeHTML(c)}">`).join("");
+  if (users) renderUsers();
 }
 
 function formData() {
@@ -87,6 +94,8 @@ function formData() {
     url: $("fUrl").value.trim(),
     category: $("fCategory").value.trim(),
     description: $("fDesc").value.trim(),
+    paid: $("fPaid").checked,
+    price: $("fPaid").checked ? $("fPrice").value.trim() : "",
   };
 }
 
@@ -111,6 +120,7 @@ function renderPreview() {
 function resetForm() {
   editingId = null;
   $("gameForm").reset();
+  $("priceField").classList.add("hidden");
   setImage(null);
   $("formTitle").textContent = "Add a game";
   $("saveBtn").textContent = "Add game";
@@ -128,6 +138,9 @@ function startEdit(id) {
   $("fCategory").value = g.category || "";
   setImage(null);
   $("fDesc").value = g.description || "";
+  $("fPaid").checked = !!g.paid;
+  $("fPrice").value = g.price || "";
+  $("priceField").classList.toggle("hidden", !g.paid);
   $("formTitle").textContent = `Edit “${g.name}”`;
   $("saveBtn").textContent = "Save changes";
   $("cancelEdit").classList.remove("hidden");
@@ -157,11 +170,14 @@ async function refresh() {
   } finally {
     setBusy(false);
   }
+  loadUsers();
 }
 
 /* ---------- Thumbnail upload ---------- */
+// Any picture the browser can open, or a PDF (its first page is used),
+// is redrawn as a small WebP so it's quick to save and load.
 const MAX_SIDE = 512;
-const ACCEPTED = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+const PDFJS = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174";
 
 function setImage(img) {
   pendingImage = img;
@@ -171,42 +187,88 @@ function setImage(img) {
   $("uploadLabel").textContent = img ? "Picture ready ✓" : editing ? "Change picture" : "Upload a picture";
   $("uploadHint").textContent = img
     ? "Click to pick a different one"
-    : editing ? "Optional · leave it to keep the current picture" : "PNG, JPG, WebP or GIF · click or drag it here";
+    : editing ? "Optional · leave it to keep the current picture" : "Any picture or a PDF · click or drag it here";
   $("thumbReq").classList.toggle("hidden", !!editing);
   $("fThumbFile").value = "";
   renderPreview();
 }
 
-// Shrink the picture to a square-ish thumbnail so the repo stays small.
 function loadImage(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("That file isn't a picture we can read.")); };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error(/hei[cf]/i.test(file.type + file.name)
+        ? "iPhone HEIC photos don't work in this browser. Take a screenshot of it, or save it as JPG, and upload that."
+        : "That file isn't a picture this browser can open. Try a PNG, JPG or PDF."));
+    };
     img.src = url;
   });
 }
-async function processImage(file) {
-  if (!ACCEPTED.includes(file.type)) throw new Error("Please pick a PNG, JPG, WebP or GIF picture.");
-  if (file.size > 15 * 1024 * 1024) throw new Error("That picture is too big (max 15 MB).");
-  const img = await loadImage(file);
-  const scale = Math.min(1, MAX_SIDE / Math.max(img.naturalWidth, img.naturalHeight));
+
+let pdfjsReady;
+function loadPdfJs() {
+  pdfjsReady ??= new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = `${PDFJS}/pdf.min.js`;
+    s.onload = () => {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS}/pdf.worker.min.js`;
+      resolve(window.pdfjsLib);
+    };
+    s.onerror = () => { pdfjsReady = null; reject(new Error("Couldn't load the PDF reader. Check your internet and try again.")); };
+    document.head.appendChild(s);
+  });
+  return pdfjsReady;
+}
+async function renderPdf(file) {
+  const pdfjs = await loadPdfJs();
+  let pdf;
+  try {
+    pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  } catch {
+    throw new Error("That PDF couldn't be opened. It may be damaged or password-protected.");
+  }
+  const page = await pdf.getPage(1);
+  const base = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale: (MAX_SIDE * 2) / Math.max(base.width, base.height) });
   const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
-  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-  canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#fff"; // PDFs are see-through by default
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  pdf.destroy();
+  return canvas;
+}
+
+async function processImage(file) {
+  if (file.size > 25 * 1024 * 1024) throw new Error("That file is too big (max 25 MB).");
+  const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+  const src = isPdf ? await renderPdf(file) : await loadImage(file);
+  const w = src.naturalWidth || src.width, h = src.naturalHeight || src.height;
+  if (!w || !h) throw new Error("That picture looks empty.");
+  const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(w * scale));
+  canvas.height = Math.max(1, Math.round(h * scale));
+  canvas.getContext("2d").drawImage(src, 0, 0, canvas.width, canvas.height);
   let dataURL = canvas.toDataURL("image/webp", 0.85);
-  if (!dataURL.startsWith("data:image/webp")) dataURL = canvas.toDataURL("image/png");
+  if (!dataURL.startsWith("data:image/webp")) dataURL = canvas.toDataURL("image/jpeg", 0.88);
   const [head, base64] = dataURL.split(",");
   return { dataURL, base64, type: head.slice(5, head.indexOf(";")) };
 }
 async function pickFile(file) {
   if (!file) return;
+  $("uploadLabel").textContent = "Reading picture…";
   try {
     setImage(await processImage(file));
+    if ($("status").classList.contains("warn")) setStatus("Picture ready ✓", "ok");
   } catch (err) {
-    toast(err.message, true);
+    setImage(pendingImage); // put the box back how it was
+    showError(err.message);
   }
 }
 
@@ -216,6 +278,112 @@ $("fThumbFile").addEventListener("change", (e) => pickFile(e.target.files[0]));
 ["dragleave", "drop"].forEach((ev) =>
   $("uploadBox").addEventListener(ev, (e) => { e.preventDefault(); $("uploadBox").classList.remove("drag"); }));
 $("uploadBox").addEventListener("drop", (e) => pickFile(e.dataTransfer.files[0]));
+
+/* ---------- Player accounts ---------- */
+async function loadUsers() {
+  $("userRows").innerHTML = `<p class="muted-note">Loading accounts…</p>`;
+  try {
+    users = (await api("/users")).users;
+    renderUsers();
+  } catch (err) {
+    if (!handleAuthError(err)) $("userRows").innerHTML = `<p class="muted-note">Couldn't load accounts: ${escapeHTML(err.message)}</p>`;
+  }
+}
+
+function renderUsers() {
+  if (!users) return;
+  const paidGames = games.filter((g) => g.paid);
+  const q = $("userSearch").value.trim().toLowerCase();
+  const list = users.filter((u) => !q || u.username.toLowerCase().includes(q));
+  $("userCount").textContent = `(${users.length})`;
+  if (!users.length) {
+    $("userRows").innerHTML = `<p class="muted-note">No one has signed up yet. Players make an account with the <b>Log in</b> button on the site.</p>`;
+    return;
+  }
+  if (!list.length) {
+    $("userRows").innerHTML = `<p class="muted-note">No usernames match.</p>`;
+    return;
+  }
+  $("userRows").innerHTML = list.map((u) => {
+    const owned = u.unlocked.map((id) => games.find((g) => g.id === id)).filter((g) => g && g.paid);
+    const options = paidGames.filter((g) => !u.unlocked.includes(g.id));
+    return `
+      <div class="user-row">
+        <div class="user-top">
+          <span class="avatar" style="background:${gradientFor(u.username)}">${escapeHTML(u.username[0].toUpperCase())}</span>
+          <div><div class="uname">${escapeHTML(u.username)}</div>
+            <div class="udate">Joined ${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}</div></div>
+          <button class="btn btn-danger" data-del-user="${escapeHTML(u.username)}">Delete</button>
+        </div>
+        <div class="owned-list">
+          ${owned.length
+            ? owned.map((g) => `<span class="owned-chip">✓ ${escapeHTML(g.name)}
+                <button title="Lock again" aria-label="Lock ${escapeHTML(g.name)} again" data-lock="${escapeHTML(u.username)}" data-game="${escapeHTML(g.id)}">×</button></span>`).join("")
+            : `<span class="muted-note">No paid games unlocked</span>`}
+        </div>
+        ${paidGames.length
+          ? options.length
+            ? `<div class="unlock-row">
+                <select aria-label="Paid game to unlock for ${escapeHTML(u.username)}">
+                  ${options.map((g) => `<option value="${escapeHTML(g.id)}">${escapeHTML(g.name)} · by ${escapeHTML(g.creator)}</option>`).join("")}
+                </select>
+                <button class="btn btn-primary btn-small" data-unlock="${escapeHTML(u.username)}">🔓 Unlock</button>
+              </div>`
+            : `<span class="muted-note">Owns every paid game 🎉</span>`
+          : `<span class="muted-note">Tick “Needs to pay owner to own” on a game to make it unlockable.</span>`}
+      </div>`;
+  }).join("");
+}
+
+async function setUnlock(username, gameId, unlock) {
+  const g = games.find((x) => x.id === gameId);
+  try {
+    const { user } = await api(`/users/${encodeURIComponent(username)}/${unlock ? "unlock" : "lock"}`, {
+      method: "POST", body: JSON.stringify({ gameId }),
+    });
+    users = users.map((u) => (u.username === user.username ? user : u));
+    renderUsers();
+    toast(unlock ? `Unlocked “${g ? g.name : "game"}” for ${username} 🔓` : `Locked “${g ? g.name : "game"}” for ${username}`);
+  } catch (err) {
+    if (!handleAuthError(err)) toast(err.message, true);
+    renderUsers();
+  }
+}
+
+$("userSearch").addEventListener("input", renderUsers);
+$("refreshUsersBtn").addEventListener("click", loadUsers);
+$("userRows").addEventListener("click", async (e) => {
+  const unlockBtn = e.target.closest("[data-unlock]");
+  if (unlockBtn) {
+    unlockBtn.disabled = true;
+    const gameId = unlockBtn.parentElement.querySelector("select").value;
+    return setUnlock(unlockBtn.dataset.unlock, gameId, true);
+  }
+  const lockBtn = e.target.closest("[data-lock]");
+  if (lockBtn) {
+    const g = games.find((x) => x.id === lockBtn.dataset.game);
+    if (!confirm(`Lock “${g ? g.name : "this game"}” for ${lockBtn.dataset.lock} again?`)) return;
+    return setUnlock(lockBtn.dataset.lock, lockBtn.dataset.game, false);
+  }
+  const delBtn = e.target.closest("[data-del-user]");
+  if (delBtn) {
+    const name = delBtn.dataset.delUser;
+    if (!confirm(`Delete the account “${name}”? They will lose every game unlocked for them.`)) return;
+    try {
+      await api(`/users/${encodeURIComponent(name)}`, { method: "DELETE" });
+      users = users.filter((u) => u.username !== name);
+      renderUsers();
+      toast(`Deleted ${name}`);
+    } catch (err) {
+      if (!handleAuthError(err)) toast(err.message, true);
+    }
+  }
+});
+
+$("fPaid").addEventListener("change", () => {
+  $("priceField").classList.toggle("hidden", !$("fPaid").checked);
+  if ($("fPaid").checked) $("fPrice").focus();
+});
 
 /* ---------- Events ---------- */
 $("loginForm").addEventListener("submit", async (e) => {
@@ -250,7 +418,7 @@ $("gameForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const data = formData();
   if (!safeURL(data.url)) return toast("The game link must start with http:// or https://", true);
-  if (!editingId && !pendingImage) return toast("Please upload a thumbnail picture", true);
+  if (!editingId && !pendingImage) return showError("Please upload a thumbnail picture first.");
   if (pendingImage) data.image = { data: pendingImage.base64, type: pendingImage.type };
 
   setBusy(true);
@@ -271,8 +439,7 @@ $("gameForm").addEventListener("submit", async (e) => {
     setStatus("Saved to main. Live on the site in about a minute.", "ok");
   } catch (err) {
     if (!handleAuthError(err)) {
-      toast(`Save failed: ${err.message}`, true);
-      setStatus(`Save failed: ${err.message}`, "warn");
+      showError(`Save failed: ${err.message}`);
     }
   } finally {
     setBusy(false);
