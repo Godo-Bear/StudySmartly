@@ -1,0 +1,9 @@
+// Cloudflare Workers config: serves this repo as a static site.
+{
+  "name": "studysmartly",
+  "compatibility_date": "2025-10-01",
+  "assets": {
+    "directory": "./",
+    "not_found_handling": "404-page"
+  }
+}
