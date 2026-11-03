@@ -35,10 +35,12 @@
   </nav>
 
   <main class="container">
-    <section class="hero">
+    <section class="hero" id="hero">
       <div>
-        <h1>Play. Create. Share.</h1>
-        <p>Games built by our crew — pick one and hit play. Made something cool? Hit <b>＋ Add your game</b> to share it.</p>
+        <div class="crumbs hidden" id="crumbs"></div>
+        <span class="hero-icon hidden" id="heroIcon"></span>
+        <h1 id="heroTitle">Play. Create. Share.</h1>
+        <p id="heroText">Games built by our crew — pick one and hit play. Made something cool? Hit <b>＋ Add your game</b> to share it.</p>
       </div>
       <div class="hero-stats">
         <div class="stat"><b id="statGames">0</b><span>Games</span></div>
@@ -46,12 +48,18 @@
       </div>
     </section>
 
-    <div class="section-head">
-      <span data-icon="plus"></span>
-      <h2 id="sectionTitle">New Games</h2>
-      <span class="result-count" id="resultCount"></span>
+    <!-- Home: one section per game type -->
+    <div id="homeSections" class="hidden"></div>
+
+    <!-- A game type, a creator, or search results -->
+    <div id="listView">
+      <div class="section-head">
+        <span data-icon="plus"></span>
+        <h2 id="sectionTitle">Games</h2>
+        <span class="result-count" id="resultCount"></span>
+      </div>
+      <div class="grid" id="grid"></div>
     </div>
-    <div class="grid" id="grid"></div>
   </main>
 
   <footer class="site-footer">

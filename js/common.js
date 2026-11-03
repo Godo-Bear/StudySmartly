@@ -237,3 +237,68 @@ async function logOut() {
   setToken("");
   location.reload();
 }
+
+/* ---------- Sidebar: Home, game types, Creators, Add your game ---------- */
+const CATEGORY_ICONS = {
+  action: "⚡", shooting: "🎯", shooter: "🎯", racing: "🏎️", car: "🚗", puzzle: "🧩", platformer: "🍄",
+  multiplayer: "👥", "2 player": "👥", skill: "🎳", strategy: "♟️", sports: "⚽", adventure: "🗺️",
+  horror: "👻", arcade: "🕹️", io: "🌐", girls: "💖", clicker: "👆", idle: "⏳", music: "🎵",
+  educational: "📚", math: "➗", fighting: "🥊", simulation: "🛠️", other: "🎮",
+};
+function categoryIcon(name) {
+  return CATEGORY_ICONS[String(name || "").trim().toLowerCase()] || "🎮";
+}
+function gameCategory(g) {
+  return (g.category || "Other").trim() || "Other";
+}
+function categoryCounts(games) {
+  const counts = {};
+  for (const g of games) counts[gameCategory(g)] = (counts[gameCategory(g)] || 0) + 1;
+  return Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+function categoryURL(name) {
+  return `index.html?category=${encodeURIComponent(name)}`;
+}
+function creatorURL(name) {
+  return `index.html?creator=${encodeURIComponent(name)}`;
+}
+
+// active: "home" | "category:<name>" | "creators" | "create"
+function initSidebar(games, active = "") {
+  if (document.getElementById("sidebar")) return;
+  const link = (href, icon, label, key, count) => `
+    <a class="side-link ${active.toLowerCase() === key.toLowerCase() ? "active" : ""}" href="${href}">
+      <span class="side-icon">${icon}</span><span class="side-label">${escapeHTML(label)}</span>
+      ${count != null ? `<span class="side-count">${count}</span>` : ""}
+    </a>`;
+  const cats = categoryCounts(games);
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
+    <aside class="sidebar" id="sidebar" aria-label="Site menu">
+      <nav>
+        ${link("./", "🏠", "Home", "home", games.length)}
+        <div class="side-heading">Game types</div>
+        ${cats.length
+          ? cats.map(([name, n]) => link(categoryURL(name), categoryIcon(name), name, `category:${name}`, n)).join("")
+          : `<p class="side-empty">No games yet</p>`}
+        <div class="side-heading">Community</div>
+        ${link("creators.html", "👥", "Creators", "creators")}
+        ${link("create.html", "＋", "Add your game", "create")}
+      </nav>
+    </aside>`);
+  document.body.classList.add("has-sidebar");
+
+  // ☰ button for small screens
+  const headerInner = document.querySelector(".header-inner");
+  if (headerInner && !document.getElementById("menuBtn")) {
+    headerInner.insertAdjacentHTML("afterbegin",
+      `<button class="menu-btn" id="menuBtn" aria-label="Open menu" aria-controls="sidebar" aria-expanded="false"><span></span><span></span><span></span></button>`);
+  }
+  const setOpen = (open) => {
+    document.body.classList.toggle("sidebar-open", open);
+    document.getElementById("menuBtn")?.setAttribute("aria-expanded", open);
+  };
+  document.getElementById("menuBtn")?.addEventListener("click", () => setOpen(!document.body.classList.contains("sidebar-open")));
+  document.getElementById("sidebarBackdrop").addEventListener("click", () => setOpen(false));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
+}

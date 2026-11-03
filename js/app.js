@@ -1,69 +1,121 @@
-// StudySmartly — home page game library
+// StudySmartly — home page. The same page also shows one game type
+// (index.html?category=Shooting) or one creator's games (?creator=Name).
 
-const state = { games: [], category: "All", query: "", user: null };
+const params = new URLSearchParams(location.search);
+const state = {
+  games: [],
+  user: null,
+  category: params.get("category") || "",
+  creator: params.get("creator") || "",
+  query: (params.get("q") || "").trim(),
+};
 const $ = (id) => document.getElementById(id);
 
-function categories() {
-  const counts = {};
-  for (const g of state.games) {
-    const c = (g.category || "Other").trim();
-    counts[c] = (counts[c] || 0) + 1;
-  }
-  return Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+function pageGames() {
+  return state.games.filter((g) =>
+    (!state.category || gameCategory(g).toLowerCase() === state.category.toLowerCase()) &&
+    (!state.creator || (g.creator || "").trim().toLowerCase() === state.creator.toLowerCase()));
 }
 
 function renderChips() {
-  const chips = [["All", state.games.length], ...categories()];
-  $("chips").innerHTML = chips
-    .map(([name, count]) => `
-      <button class="chip ${name === state.category ? "active" : ""}" data-cat="${escapeHTML(name)}">
-        ${escapeHTML(name)} <span class="count">${count}</span>
-      </button>`)
-    .join("");
+  const all = state.creator ? pageGames() : state.games; // on a creator page, chips show their types
+  const chips = categoryCounts(all);
+  const base = state.creator ? `&creator=${encodeURIComponent(state.creator)}` : "";
+  const allHref = state.creator ? creatorURL(state.creator) : "./";
+  $("chips").innerHTML = `
+    <a class="chip ${!state.category ? "active" : ""}" href="${allHref}">All <span class="count">${all.length}</span></a>
+    ${chips.map(([name, n]) => `
+      <a class="chip ${state.category.toLowerCase() === name.toLowerCase() ? "active" : ""}" href="${categoryURL(name)}${base}">
+        ${categoryIcon(name)} ${escapeHTML(name)} <span class="count">${n}</span>
+      </a>`).join("")}`;
+  $("chips").querySelector(".active")?.scrollIntoView({ block: "nearest", inline: "center" });
+}
+
+function renderHero() {
+  const list = pageGames();
+  const creators = new Set(list.map((g) => (g.creator || "").trim().toLowerCase()).filter(Boolean));
+  $("statGames").textContent = list.length;
+  $("statCreators").textContent = creators.size;
+  if (!state.category && !state.creator) return;
+
+  // Proper casing from the data, e.g. ?category=shooting -> "Shooting"
+  const cat = state.category && (state.games.map(gameCategory).find((c) => c.toLowerCase() === state.category.toLowerCase()) || state.category);
+  const who = state.creator && (state.games.map((g) => (g.creator || "").trim()).find((c) => c.toLowerCase() === state.creator.toLowerCase()) || state.creator);
+  $("crumbs").classList.remove("hidden");
+  $("crumbs").innerHTML = `<a href="./">Home</a> › ${who ? `<a href="creators.html">Creators</a> › ` : ""}${escapeHTML(who && cat ? `${who} · ${cat}` : who || cat)}`;
+  if (who) {
+    $("heroIcon").classList.add("hidden");
+    $("heroTitle").textContent = cat ? `${who}'s ${cat} games` : `Games by ${who}`;
+    $("heroText").textContent = `Every game ${who} has shared on StudySmartly.`;
+    document.title = `Games by ${who} · StudySmartly`;
+  } else {
+    $("heroIcon").textContent = categoryIcon(cat);
+    $("heroIcon").classList.remove("hidden");
+    $("heroTitle").textContent = `${cat} Games`;
+    $("heroText").textContent = `Every ${cat.toLowerCase()} game on StudySmartly. Pick one and hit play.`;
+    document.title = `${cat} Games · StudySmartly`;
+  }
 }
 
 function filtered() {
   const q = state.query.toLowerCase();
-  return state.games.filter((g) => {
-    const inCat = state.category === "All" || (g.category || "Other").trim() === state.category;
+  return pageGames().filter((g) => {
     const hay = `${g.name} ${g.creator} ${g.category} ${g.description}`.toLowerCase();
-    return inCat && (!q || hay.includes(q));
+    return !q || hay.includes(q);
   });
+}
+
+const isHome = () => !state.category && !state.creator && !state.query;
+
+// Home page: a section for each game type, newest games first.
+const PER_SECTION = 6;
+function renderHomeSections() {
+  const cats = categoryCounts(state.games);
+  $("homeSections").innerHTML = cats.length
+    ? cats.map(([name, n]) => {
+        const games = state.games.filter((g) => gameCategory(g) === name).slice(0, PER_SECTION);
+        return `
+          <section class="home-section">
+            <div class="section-head">
+              <span class="section-icon">${categoryIcon(name)}</span>
+              <h2><a href="${categoryURL(name)}">${escapeHTML(name)}</a></h2>
+              <a class="see-all" href="${categoryURL(name)}">See all ${n} →</a>
+            </div>
+            <div class="grid">${games.map((g) => cardHTML(g, state.user)).join("")}</div>
+          </section>`;
+      }).join("")
+    : `<div class="empty" style="margin-top:30px"><div class="big">🎮</div><h3>No games yet</h3><p>Be the first: <a href="create.html" style="color:var(--accent);font-weight:700">add your game</a>.</p></div>`;
+}
+
+function render() {
+  const home = isHome();
+  $("homeSections").classList.toggle("hidden", !home);
+  $("listView").classList.toggle("hidden", home);
+  if (home) renderHomeSections();
+  else renderGrid();
 }
 
 function renderGrid() {
   const list = filtered();
   $("sectionTitle").textContent = state.query
     ? `Results for “${state.query}”`
-    : state.category === "All" ? "New Games" : `${state.category} Games`;
+    : "All games";
   $("resultCount").textContent = `${list.length} game${list.length === 1 ? "" : "s"}`;
 
   if (!list.length) {
-    $("grid").innerHTML = state.games.length
-      ? `<div class="empty"><div class="big">🔍</div><h3>No games found</h3><p>Try a different search or category.</p></div>`
-      : `<div class="empty"><div class="big">🎮</div><h3>No games yet</h3><p>Be the first: <a href="create.html" style="color:var(--accent);font-weight:700">add your game</a>.</p></div>`;
+    $("grid").innerHTML = state.query
+      ? `<div class="empty"><div class="big">🔍</div><h3>No games found</h3><p>Try a different search.</p></div>`
+      : state.category || state.creator
+        ? `<div class="empty"><div class="big">${state.category ? categoryIcon(state.category) : "🎮"}</div><h3>Nothing here yet</h3><p>Made one? <a href="create.html" style="color:var(--accent);font-weight:700">Add your game</a>.</p></div>`
+        : `<div class="empty"><div class="big">🎮</div><h3>No games yet</h3><p>Be the first: <a href="create.html" style="color:var(--accent);font-weight:700">add your game</a>.</p></div>`;
     return;
   }
   $("grid").innerHTML = list.map((g) => cardHTML(g, state.user)).join("");
 }
 
-function renderStats() {
-  $("statGames").textContent = state.games.length;
-  const creators = new Set(state.games.map((g) => (g.creator || "").trim().toLowerCase()).filter(Boolean));
-  $("statCreators").textContent = creators.size;
-}
-
-$("chips").addEventListener("click", (e) => {
-  const chip = e.target.closest(".chip");
-  if (!chip) return;
-  state.category = chip.dataset.cat;
-  renderChips();
-  renderGrid();
-});
-
 $("searchInput").addEventListener("input", (e) => {
   state.query = e.target.value.trim();
-  renderGrid();
+  render();
 });
 $("searchForm").addEventListener("submit", (e) => e.preventDefault());
 
@@ -71,13 +123,12 @@ $("searchForm").addEventListener("submit", (e) => e.preventDefault());
   fillIcons();
   initTheme();
   $("year").textContent = new Date().getFullYear();
-  // Searches submitted from the play page arrive as ?q=
-  const q = new URLSearchParams(location.search).get("q");
-  if (q) { state.query = q.trim(); $("searchInput").value = state.query; }
+  if (state.query) $("searchInput").value = state.query;
   [state.games, state.user] = await Promise.all([fetchGames(), loadMe()]);
   initAccount(state.user);
+  initSidebar(state.games, state.category ? `category:${state.category}` : state.creator ? "creators" : "home");
   addCreateButton();
-  renderStats();
+  renderHero();
   renderChips();
-  renderGrid();
+  render();
 })();

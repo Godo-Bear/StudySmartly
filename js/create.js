@@ -382,15 +382,100 @@ async function loadMyGames() {
           <div class="my-game-meta">${isUploaded(g) ? "📦 Hosted here" : "🔗 Link"}${g.paid ? ` · 🔒 Paid${g.price ? ` ${escapeHTML(g.price)}` : ""}` : ""}</div>
         </div>
         <div class="row-actions">
+          ${g.paid ? `<button class="btn btn-primary btn-small" data-sell="${escapeHTML(g.id)}" title="Unlock for a buyer">🔓 Unlock</button>` : ""}
           <a class="btn btn-ghost btn-small" href="${playURL(g)}" title="Play">▶</a>
           <button class="btn btn-ghost btn-small" data-edit="${escapeHTML(g.id)}">Edit</button>
           <button class="btn btn-danger" data-del="${escapeHTML(g.id)}">Delete</button>
         </div>
+        ${g.paid ? `<div class="sell-panel hidden" id="sell-${escapeHTML(g.id)}"></div>` : ""}
       </div>`).join("")
     : `<p class="muted-note">You haven't added any games yet. Your first one is on the left 👈</p>`;
 }
 
+/* ---------- Unlock my paid games for buyers ---------- */
+async function openSell(id) {
+  const panel = $(`sell-${id}`);
+  if (!panel) return;
+  const open = panel.classList.toggle("hidden") === false;
+  if (!open) return;
+  const g = myGames.find((x) => x.id === id);
+  panel.innerHTML = `
+    <form class="sell-form" data-sell-form="${escapeHTML(id)}">
+      <div class="sell-title">Someone paid you for <b>${escapeHTML(g.name)}</b>? Unlock it for their account.</div>
+      <div class="sell-grid">
+        <input name="username" placeholder="Their username" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+        <select name="paidWith"><option>Cash</option><option>Bank transfer</option><option>Gift / free</option><option>Other</option></select>
+        <input name="note" maxlength="100" placeholder="Note (optional)">
+        <button class="btn btn-primary btn-small" type="submit">🔓 Unlock</button>
+      </div>
+      <div class="unlock-result hidden"></div>
+    </form>
+    <div class="buyers"><p class="muted-note">Loading who owns it…</p></div>`;
+  panel.querySelector("input").focus();
+  loadBuyers(id);
+}
+
+async function loadBuyers(id) {
+  const box = document.querySelector(`#sell-${id} .buyers`);
+  try {
+    const { buyers } = await userApi(`/my/games/${encodeURIComponent(id)}/buyers`);
+    box.innerHTML = buyers.length
+      ? `<div class="sell-title">Owned by ${buyers.length}:</div><div class="owned-list">${buyers.map((b) => `
+          <span class="owned-chip" title="${escapeHTML(b.at ? `Unlocked by ${b.by} on ${new Date(b.at).toLocaleDateString()}${b.note ? ` · ${b.note}` : ""}` : "")}">
+            ✓ ${escapeHTML(b.username)}${b.paidWith ? ` <span class="via">· ${escapeHTML(b.paidWith)}</span>` : ""}
+            <button type="button" title="Lock again" aria-label="Lock again for ${escapeHTML(b.username)}" data-relock="${escapeHTML(id)}" data-user="${escapeHTML(b.username)}">×</button>
+          </span>`).join("")}</div>`
+      : `<p class="muted-note">Nobody owns it yet.</p>`;
+  } catch (err) {
+    box.innerHTML = `<p class="muted-note">Couldn't load buyers: ${escapeHTML(err.message)}</p>`;
+  }
+}
+
+$("myGames").addEventListener("submit", async (e) => {
+  const form = e.target.closest("[data-sell-form]");
+  if (!form) return;
+  e.preventDefault();
+  const id = form.dataset.sellForm;
+  const result = form.querySelector(".unlock-result");
+  const btn = form.querySelector("button[type=submit]");
+  const username = form.username.value.trim();
+  if (!username) return;
+  btn.disabled = true;
+  try {
+    const { buyer } = await userApi(`/my/games/${encodeURIComponent(id)}/unlock`, {
+      method: "POST",
+      body: JSON.stringify({ username, paidWith: form.paidWith.value, note: form.note.value.trim() }),
+    });
+    result.textContent = `✓ Unlocked for ${buyer.username}. They can play it now.`;
+    result.className = "unlock-result ok";
+    form.username.value = "";
+    form.note.value = "";
+    loadBuyers(id);
+  } catch (err) {
+    result.textContent = err.message;
+    result.className = "unlock-result err";
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 $("myGames").addEventListener("click", async (e) => {
+  const sell = e.target.closest("[data-sell]");
+  if (sell) return openSell(sell.dataset.sell);
+  const relock = e.target.closest("[data-relock]");
+  if (relock) {
+    if (!confirm(`Lock this game again for ${relock.dataset.user}?`)) return;
+    try {
+      await userApi(`/my/games/${encodeURIComponent(relock.dataset.relock)}/lock`, {
+        method: "POST", body: JSON.stringify({ username: relock.dataset.user }),
+      });
+      toast(`Locked again for ${relock.dataset.user}`);
+      loadBuyers(relock.dataset.relock);
+    } catch (err) {
+      toast(err.message, true);
+    }
+    return;
+  }
   const ed = e.target.closest("[data-edit]");
   if (ed) return startEdit(ed.dataset.edit);
   const del = e.target.closest("[data-del]");
@@ -416,6 +501,7 @@ $("myGames").addEventListener("click", async (e) => {
   const [user, games] = await Promise.all([loadMe(), fetchGames()]);
   me = user;
   initAccount(me);
+  initSidebar(games, "create");
   if (!me) {
     $("gate").classList.remove("hidden");
     $("gateSignup").href = loginURL("signup");

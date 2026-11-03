@@ -157,14 +157,31 @@ async function handleCreator(request, env, url, path, method) {
     return json({ game: result.game }, 201);
   }
 
-  // Edit / delete one of my games
-  const mine = path.match(/^\/api\/my\/games\/([\w-]+)$/);
+  // Edit / delete one of my games, and unlock my paid games for buyers
+  const mine = path.match(/^\/api\/my\/games\/([\w-]+)(?:\/(buyers|unlock|lock))?$/);
   if (mine) {
     const { games } = await readGames(env);
     const game = games.find((g) => g.id === mine[1]);
     if (!game) throw httpError(404, "That game no longer exists.");
     if (!isMine(game)) throw httpError(403, "You can only change your own games.");
-    if (method === "PUT") {
+
+    if (mine[2] === "buyers" && method === "GET") {
+      const users = await listUsers(env);
+      const buyers = users
+        .filter((u) => u.unlocked.includes(game.id))
+        .map((u) => ({ username: u.username, ...(u.unlockInfo[game.id] || {}) }));
+      return json({ buyers });
+    }
+    if ((mine[2] === "unlock" || mine[2] === "lock") && method === "POST") {
+      if (!game.paid) throw httpError(400, "This game is free, so there's nothing to unlock.");
+      const { username, paidWith, note } = await request.json();
+      const buyer = await getUser(env, String(username || "").trim());
+      if (!buyer) throw httpError(404, `There's no account called “${String(username || "").trim()}”. Ask them to sign up first.`);
+      const updated = await setUnlock(env, buyer, game.id, mine[2] === "unlock", { by: user.username, paidWith, note });
+      return json({ buyer: { username: updated.username, ...(updated.unlockInfo[game.id] || {}) } });
+    }
+
+    if (!mine[2] && method === "PUT") {
       const body = await request.json();
       // Uploaded games keep their files; only the details change.
       const privateUrl = game.paid ? await env.DB.get(`url:${game.id}`) : game.url;
@@ -173,7 +190,7 @@ async function handleCreator(request, env, url, path, method) {
       await updateGame(env, game.id, data, checkImage(body.image));
       return json({ ok: true });
     }
-    if (method === "DELETE") {
+    if (!mine[2] && method === "DELETE") {
       await removeGame(env, game.id);
       return json({ ok: true });
     }
@@ -404,21 +421,8 @@ async function handleAdmin(request, env, path, method) {
     if (u[2] && method === "POST") {
       const { gameId, paidWith, note } = await request.json();
       if (!/^[\w-]+$/.test(String(gameId || ""))) throw httpError(400, "Pick a game.");
-      user.unlocked = user.unlocked.filter((x) => x !== gameId);
-      user.unlockInfo = user.unlockInfo || {};
-      delete user.unlockInfo[gameId];
-      if (u[2] === "unlock") {
-        user.unlocked.push(gameId);
-        // Keep a record of the payment, e.g. cash, for the owner.
-        user.unlockInfo[gameId] = {
-          by: me ? me.username : "admin code",
-          at: new Date().toISOString(),
-          paidWith: String(paidWith || "Cash").slice(0, 30),
-          note: String(note || "").trim().slice(0, 100),
-        };
-      }
-      await env.DB.put(key, JSON.stringify(user));
-      return json({ user: publicUser(user) });
+      const updated = await setUnlock(env, user, gameId, u[2] === "unlock", { by: me ? me.username : "admin code", paidWith, note });
+      return json({ user: publicUser(updated) });
     }
     if (!u[2] && method === "DELETE") {
       if (me && me.username === user.username) throw httpError(400, "You can't delete your own account here.");
@@ -431,6 +435,24 @@ async function handleAdmin(request, env, path, method) {
 }
 
 /* ---------- Accounts ---------- */
+// Unlock (or lock again) a paid game for an account, keeping a payment record.
+async function setUnlock(env, user, gameId, unlock, { by, paidWith, note } = {}) {
+  user.unlocked = user.unlocked.filter((x) => x !== gameId);
+  user.unlockInfo = user.unlockInfo || {};
+  delete user.unlockInfo[gameId];
+  if (unlock) {
+    user.unlocked.push(gameId);
+    user.unlockInfo[gameId] = {
+      by: String(by || "").slice(0, 30),
+      at: new Date().toISOString(),
+      paidWith: String(paidWith || "Cash").slice(0, 30),
+      note: String(note || "").trim().slice(0, 100),
+    };
+  }
+  await env.DB.put(`user:${user.username.toLowerCase()}`, JSON.stringify(user));
+  return user;
+}
+
 function checkUsername(v) {
   const name = String(v || "").trim();
   if (!/^[A-Za-z0-9_]{3,20}$/.test(name)) throw httpError(400, "Usernames are 3-20 letters, numbers or _.");

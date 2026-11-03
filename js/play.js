@@ -139,6 +139,8 @@ $("shareBtn").addEventListener("click", async () => {
   const [games, me] = await Promise.all([fetchGames(), loadMe()]);
   user = me;
   initAccount(user);
+  const current = games.find((g) => String(g.id) === new URLSearchParams(location.search).get("id"));
+  initSidebar(games, current ? `category:${gameCategory(current)}` : "");
   addCreateButton();
   render(games);
 })();

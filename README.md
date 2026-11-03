@@ -3,7 +3,9 @@
 A modern game library for games made by me and my friends. Visitors browse, search and filter games, then hit **Play** to open the game's link. Admins add, edit and remove games from the admin panel.
 
 ## Pages
-- **`index.html`**: the home page, with category chips, search and dark mode. Clicking a game opens its play page.
+- **`index.html`**: the home page, with a section for each game type, search and dark mode. The same page also shows one game type (`?category=Shooting`) or one creator's games (`?creator=Name`).
+- **`creators.html`**: everyone who has shared games. Click someone to see their games.
+- **Sidebar** (on every main page): Home, each game type with its count, Creators and Add your game. On phones it opens from the ☰ button.
 - **`play.html`**: plays the game inside StudySmartly, with Fullscreen and Share buttons and more games underneath.
 - **`admin.html`**: the admin panel. Add a game with its **name, creator, link and a thumbnail picture**, plus an optional category and description. You can also edit or delete games.
 
@@ -26,7 +28,7 @@ Tick **"Needs to pay owner to own"** when adding a game. You can also add a pric
 How a player gets a paid game:
 1. The player makes an account with the **Log in** button.
 2. They pay the game's owner however you like, such as cash or PayPal, and tell the owner their username.
-3. An admin opens **Player accounts → Unlock a paid game** in the admin panel. They pick the account and the game, choose how it was paid (Cash, for example), and click Unlock. The panel records who unlocked it, when, and the payment method.
+3. The game's creator opens **My games → 🔓 Unlock** on the Create page, types the buyer's username and picks how they paid. They can also see who owns the game, and lock it again. Or an admin opens **Player accounts → Unlock a paid game** in the admin panel. They pick the account and the game, choose how it was paid (Cash, for example), and click Unlock. The panel records who unlocked it, when, and the payment method.
 
 ## Admin accounts
 Anyone can make an account on `login.html`. In the admin panel, click **Make admin** next to an account.
