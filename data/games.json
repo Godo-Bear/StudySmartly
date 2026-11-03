@@ -18,5 +18,15 @@
     "description": "Shooting game where you fight zombies and get power ups. Play with friends in multiplayer and own lobbies",
     "thumbnail": "images/bd18448f-ae23-4b04-b5fb-9f270ae11ad5-mw07j1ca.webp",
     "addedAt": "2026-11-03T04:48:11.985Z"
+  },
+  {
+    "id": "445ab0c9-7e49-4f60-b896-3b8909940a4d",
+    "name": "Echo",
+    "creator": "Jayden Narayan",
+    "url": "https://echo-game.jn-studios.workers.dev/",
+    "category": "Puzzle",
+    "description": "Puzzle game",
+    "thumbnail": "images/445ab0c9-7e49-4f60-b896-3b8909940a4d-mw0bcsez.webp",
+    "addedAt": "2026-11-03T06:35:19.245Z"
   }
 ]
