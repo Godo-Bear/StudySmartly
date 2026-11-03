@@ -8,6 +8,7 @@ const state = {
   category: params.get("category") || "",
   creator: params.get("creator") || "",
   query: (params.get("q") || "").trim(),
+  top: [], // [{ id, count }] most played
 };
 const $ = (id) => document.getElementById(id);
 
@@ -71,7 +72,19 @@ const isHome = () => !state.category && !state.creator && !state.query;
 const PER_SECTION = 6;
 function renderHomeSections() {
   const cats = categoryCounts(state.games);
-  $("homeSections").innerHTML = cats.length
+  // 🔥 Most played first (only games that still exist and have been played)
+  const byId = new Map(state.games.map((g) => [g.id, g]));
+  const top = state.top.filter((t) => t.count > 0 && byId.has(t.id)).slice(0, PER_SECTION);
+  const mostPlayed = top.length ? `
+    <section class="home-section most-played">
+      <div class="section-head">
+        <span class="section-icon">🔥</span>
+        <h2>Most Played</h2>
+        <span class="result-count">Top ${top.length}</span>
+      </div>
+      <div class="grid">${top.map((t, i) => cardHTML(byId.get(t.id), state.user, { plays: t.count, rank: i + 1 })).join("")}</div>
+    </section>` : "";
+  $("homeSections").innerHTML = mostPlayed + (cats.length
     ? cats.map(([name, n]) => {
         const games = state.games.filter((g) => gameCategory(g) === name).slice(0, PER_SECTION);
         return `
@@ -84,7 +97,14 @@ function renderHomeSections() {
             <div class="grid">${games.map((g) => cardHTML(g, state.user)).join("")}</div>
           </section>`;
       }).join("")
-    : `<div class="empty" style="margin-top:30px"><div class="big">🎮</div><h3>No games yet</h3><p>Be the first: <a href="create.html" style="color:var(--accent);font-weight:700">add your game</a>.</p></div>`;
+    : `<div class="empty" style="margin-top:30px"><div class="big">🎮</div><h3>No games yet</h3><p>Be the first: <a href="create.html" style="color:var(--accent);font-weight:700">add your game</a>.</p></div>`);
+}
+
+async function loadTop() {
+  try {
+    const res = await fetch("/api/plays/top");
+    if (res.ok) state.top = (await res.json()).top || [];
+  } catch {}
 }
 
 function render() {
@@ -124,7 +144,7 @@ $("searchForm").addEventListener("submit", (e) => e.preventDefault());
   initTheme();
   $("year").textContent = new Date().getFullYear();
   if (state.query) $("searchInput").value = state.query;
-  [state.games, state.user] = await Promise.all([fetchGames(), loadMe()]);
+  [state.games, state.user] = await Promise.all([fetchGames(), loadMe(), isHome() ? loadTop() : null]);
   initAccount(state.user);
   initSidebar(state.games, state.category ? `category:${state.category}` : state.creator ? "creators" : "home");
   addCreateButton();

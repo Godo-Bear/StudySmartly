@@ -79,6 +79,8 @@ async function startGame() {
   if (!url) return toast("This game's link is broken.", true);
   url = await withSaveTicket(url);
   $("frame").src = url;
+  // Count the play for "Most played" (fire and forget).
+  fetch(`/api/plays/${encodeURIComponent(game.id)}`, { method: "POST", keepalive: true }).catch(() => {});
   $("frame").classList.remove("hidden");
   $("cover").classList.add("hidden");
   $("frame").focus();

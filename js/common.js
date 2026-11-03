@@ -134,7 +134,12 @@ function isOwner(g, user) {
   return !!(g.owner && user && g.owner.toLowerCase() === user.username.toLowerCase());
 }
 
-function cardHTML(g, user) {
+function formatPlays(n) {
+  return n >= 1000000 ? `${(n / 1000000).toFixed(1).replace(/\.0$/, "")}M` : n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n);
+}
+
+// opts: { plays, rank } for the Most Played section
+function cardHTML(g, user, opts = {}) {
   const owned = g.paid && user && (user.admin || user.unlocked.includes(g.id) || isOwner(g, user));
   return `
     <a class="card" href="${playURL(g)}" aria-label="Play ${escapeHTML(g.name)}">
@@ -148,7 +153,9 @@ function cardHTML(g, user) {
       <div class="card-body">
         <div class="card-title">${escapeHTML(g.name)}</div>
         <div class="card-creator">by ${escapeHTML(g.creator || "Unknown")}</div>
+        ${opts.plays ? `<div class="card-plays">▶ ${formatPlays(opts.plays)} play${opts.plays === 1 ? "" : "s"}</div>` : ""}
       </div>
+      ${opts.rank ? `<span class="rank rank-${opts.rank}">#${opts.rank}</span>` : ""}
     </a>`;
 }
 
@@ -267,7 +274,7 @@ function creatorURL(name) {
 function initSidebar(games, active = "") {
   if (document.getElementById("sidebar")) return;
   const link = (href, icon, label, key, count) => `
-    <a class="side-link ${active.toLowerCase() === key.toLowerCase() ? "active" : ""}" href="${href}">
+    <a class="side-link ${active.toLowerCase() === key.toLowerCase() ? "active" : ""}" href="${href}" title="${escapeHTML(label)}">
       <span class="side-icon">${icon}</span><span class="side-label">${escapeHTML(label)}</span>
       ${count != null ? `<span class="side-count">${count}</span>` : ""}
     </a>`;

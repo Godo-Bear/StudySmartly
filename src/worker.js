@@ -10,6 +10,8 @@
 //   Accounts, sessions, unlocks and the links of paid games live in the DB
 //   (Cloudflare KV), never in the public repo.
 
+import { DurableObject } from "cloudflare:workers";
+
 const FILE_PATH = "data/games.json";
 const IMAGE_DIR = "images";
 const IMAGE_TYPES = { "image/webp": "webp", "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif" };
@@ -93,6 +95,20 @@ async function handleApi(request, env, url) {
   }
 
   if (path.startsWith("/api/my/") || path.startsWith("/api/uploads")) return handleCreator(request, env, url, path, method);
+
+  /* ---------- Play counts (for "Most played") ---------- */
+  if (path === "/api/plays/top" && method === "GET") {
+    if (!env.PLAYS) return json({ top: [] });
+    const top = await playCounter(env).top(24);
+    return new Response(JSON.stringify({ top }), {
+      headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=60" },
+    });
+  }
+  const hit = path.match(/^\/api\/plays\/([\w-]+)$/);
+  if (hit && method === "POST") {
+    if (env.PLAYS) await playCounter(env).hit(hit[1], request.headers.get("CF-Connecting-IP") || "");
+    return json({ ok: true });
+  }
 
   /* ---------- Saved progress for uploaded games ---------- */
   const save = path.match(/^\/api\/saves\/([\w-]+)(\/ticket)?$/);
@@ -727,4 +743,35 @@ function b64encode(str) {
 function b64decode(b64) {
   const bin = atob(b64.replace(/\s/g, ""));
   return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+}
+
+/* ---------- Play counter ----------
+   One Durable Object (with its own small SQLite database) counts plays.
+   It's on Cloudflare's free plan, and unlike KV it's fine with a write on
+   every play. Each visitor counts at most once per game every 30 minutes. */
+function playCounter(env) {
+  return env.PLAYS.get(env.PLAYS.idFromName("all"));
+}
+
+export class PlayCounter extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
+    this.sql.exec("CREATE TABLE IF NOT EXISTS plays (id TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0)");
+    this.recent = new Map(); // "ip|game" -> time, to ignore spam clicks
+  }
+
+  async hit(id, ip) {
+    if (!/^[\w-]{1,64}$/.test(id)) return;
+    const key = `${ip}|${id}`;
+    const now = Date.now();
+    if (ip && now - (this.recent.get(key) || 0) < 30 * 60 * 1000) return;
+    this.recent.set(key, now);
+    if (this.recent.size > 5000) this.recent.clear();
+    this.sql.exec("INSERT INTO plays (id, count) VALUES (?, 1) ON CONFLICT(id) DO UPDATE SET count = count + 1", id);
+  }
+
+  async top(n) {
+    return this.sql.exec("SELECT id, count FROM plays ORDER BY count DESC LIMIT ?", n).toArray();
+  }
 }
