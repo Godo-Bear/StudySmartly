@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StudySmartly — Games by Us</title>
+  <meta name="description" content="StudySmartly: play games made by me and my friends.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎮</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/common.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="./" class="logo">
+        <div class="logo-mark" data-icon="logo"></div>
+        <div class="logo-text">Study<span>Smartly</span></div>
+      </a>
+      <div class="header-actions">
+        <form class="search" id="searchForm" role="search">
+          <input id="searchInput" type="search" placeholder="Search game or creator" aria-label="Search games" autocomplete="off">
+          <button type="submit" aria-label="Search" data-icon="search"></button>
+        </form>
+        <button class="icon-btn" data-theme-toggle aria-label="Toggle dark mode"></button>
+      </div>
+    </div>
+  </header>
+
+  <nav class="category-bar">
+    <div class="container chips" id="chips"></div>
+  </nav>
+
+  <main class="container">
+    <section class="hero">
+      <div>
+        <h1>Play. Create. Share.</h1>
+        <p>Games built by our crew — pick one and hit play. Made something cool? Ask an admin to get it added.</p>
+      </div>
+      <div class="hero-stats">
+        <div class="stat"><b id="statGames">0</b><span>Games</span></div>
+        <div class="stat"><b id="statCreators">0</b><span>Creators</span></div>
+      </div>
+    </section>
+
+    <div class="section-head">
+      <span data-icon="plus"></span>
+      <h2 id="sectionTitle">New Games</h2>
+      <span class="result-count" id="resultCount"></span>
+    </div>
+    <div class="grid" id="grid"></div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <span>© <span id="year"></span> StudySmartly · Made by friends, for friends.</span>
+      <a href="admin.html">Admin panel →</a>
+    </div>
+  </footer>
+
+  <!-- Game details modal -->
+  <div class="modal-backdrop" id="modal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <button class="modal-close" id="modalClose" aria-label="Close">×</button>
+      <div class="thumb" id="modalThumb"></div>
+      <div class="modal-info">
+        <h2 id="modalTitle"></h2>
+        <div class="modal-meta" id="modalMeta"></div>
+        <p id="modalDesc"></p>
+        <a class="btn btn-play" id="modalPlay" target="_blank" rel="noopener noreferrer">
+          <span data-icon="play"></span> Play Now
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

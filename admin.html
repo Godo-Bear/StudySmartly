@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StudySmartly Admin</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/common.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="./" class="logo">
+        <div class="logo-mark" data-icon="logo"></div>
+        <div class="logo-text">Study<span>Smartly</span> <small style="font-family:Nunito;font-size:14px;color:#9aa0c3;font-weight:700">ADMIN</small></div>
+      </a>
+      <div class="header-actions" style="justify-content:flex-end">
+        <a class="btn btn-ghost btn-small" href="./">← Back to site</a>
+        <button class="btn btn-ghost btn-small hidden" id="logoutBtn">Log out</button>
+        <button class="icon-btn" data-theme-toggle aria-label="Toggle dark mode"></button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Login: admins sign in with a GitHub token that has write access to the repo -->
+  <section class="login-wrap" id="loginView">
+    <div class="panel">
+      <h2>🛡️ Admin sign in</h2>
+      <p class="sub">Games are saved straight to the <b>main</b> branch of the GitHub repo, so only people with write access to the repo can add or remove games.</p>
+      <form id="loginForm">
+        <div class="row">
+          <div class="field"><label for="ghOwner">Repo owner</label><input id="ghOwner" required></div>
+          <div class="field"><label for="ghRepo">Repo name</label><input id="ghRepo" required></div>
+        </div>
+        <div class="field"><label for="ghBranch">Branch</label><input id="ghBranch" value="main" required></div>
+        <div class="field">
+          <label for="ghToken">GitHub access token <span class="req">*</span></label>
+          <input id="ghToken" type="password" placeholder="github_pat_…" required autocomplete="off">
+          <span class="hint">Stored only in this browser. Never share it.</span>
+        </div>
+        <label style="display:flex;gap:8px;align-items:center;font-size:14px;margin-bottom:16px">
+          <input type="checkbox" id="remember" checked> Remember me on this device
+        </label>
+        <button class="btn btn-primary" style="width:100%" type="submit" id="loginBtn">Sign in</button>
+      </form>
+      <details class="help">
+        <summary>How do I get a token?</summary>
+        <ol>
+          <li>Go to <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener" style="color:var(--accent)">GitHub → Fine-grained tokens</a>.</li>
+          <li>Under <b>Repository access</b>, pick only this repo.</li>
+          <li>Under <b>Permissions → Contents</b>, choose <b>Read and write</b>.</li>
+          <li>Generate it and paste it above.</li>
+        </ol>
+        To add another admin, invite them as a collaborator on the repo; they make their own token.
+      </details>
+    </div>
+  </section>
+
+  <!-- Dashboard -->
+  <main class="container hidden" id="dashView">
+    <div class="admin-layout">
+      <div class="panel">
+        <h2 id="formTitle">Add a game</h2>
+        <p class="sub">Paste the link to the game website and who made it.</p>
+        <form id="gameForm">
+          <div class="field">
+            <label for="fName">Game name <span class="req">*</span></label>
+            <input id="fName" maxlength="60" required placeholder="e.g. Space Dodge">
+          </div>
+          <div class="field">
+            <label for="fCreator">Creator <span class="req">*</span></label>
+            <input id="fCreator" maxlength="60" required placeholder="Who made it?" list="creatorList">
+            <datalist id="creatorList"></datalist>
+          </div>
+          <div class="field">
+            <label for="fUrl">Game link <span class="req">*</span></label>
+            <input id="fUrl" type="url" required placeholder="https://…">
+          </div>
+          <div class="row">
+            <div class="field">
+              <label for="fCategory">Category</label>
+              <input id="fCategory" maxlength="30" placeholder="Action" list="categoryList">
+              <datalist id="categoryList"></datalist>
+            </div>
+            <div class="field">
+              <label for="fThumb">Thumbnail image URL</label>
+              <input id="fThumb" type="url" placeholder="optional">
+            </div>
+          </div>
+          <div class="field">
+            <label for="fDesc">Description</label>
+            <textarea id="fDesc" maxlength="400" placeholder="What's the game about? How do you play?"></textarea>
+          </div>
+          <div class="actions">
+            <button class="btn btn-primary" type="submit" id="saveBtn">Add game</button>
+            <button class="btn btn-ghost hidden" type="button" id="cancelEdit">Cancel edit</button>
+          </div>
+        </form>
+        <div class="card preview-card" id="preview"></div>
+      </div>
+
+      <div class="panel">
+        <div class="status" id="status"><span class="dot"></span><span id="statusText">Connecting…</span></div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <h2 style="margin:0">All games <span id="gameCount" style="color:var(--muted);font-weight:600"></span></h2>
+          <button class="btn btn-ghost btn-small" id="refreshBtn" style="margin-left:auto">↻ Refresh</button>
+        </div>
+        <p class="sub">Changes go live on the site after GitHub Pages rebuilds (about a minute).</p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th></th><th>Game</th><th>Creator</th><th>Category</th><th></th></tr></thead>
+            <tbody id="gameRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="js/admin.js"></script>
+</body>
+</html>
