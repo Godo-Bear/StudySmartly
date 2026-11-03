@@ -71,7 +71,6 @@ const isHome = () => !state.category && !state.creator && !state.query;
 // Home page: a section for each game type, newest games first.
 const PER_SECTION = 6;
 function renderHomeSections() {
-  const cats = categoryCounts(state.games);
   // 🔥 Most played first (only games that still exist and have been played)
   const byId = new Map(state.games.map((g) => [g.id, g]));
   const top = state.top.filter((t) => t.count > 0 && byId.has(t.id)).slice(0, PER_SECTION);
@@ -84,20 +83,18 @@ function renderHomeSections() {
       </div>
       <div class="grid">${top.map((t, i) => cardHTML(byId.get(t.id), state.user, { plays: t.count, rank: i + 1 })).join("")}</div>
     </section>` : "";
-  $("homeSections").innerHTML = mostPlayed + (cats.length
-    ? cats.map(([name, n]) => {
-        const games = state.games.filter((g) => gameCategory(g) === name).slice(0, PER_SECTION);
-        return `
-          <section class="home-section">
-            <div class="section-head">
-              <span class="section-icon">${categoryIcon(name)}</span>
-              <h2><a href="${categoryURL(name)}">${escapeHTML(name)}</a></h2>
-              <a class="see-all" href="${categoryURL(name)}">See all ${n} →</a>
-            </div>
-            <div class="grid">${games.map((g) => cardHTML(g, state.user)).join("")}</div>
-          </section>`;
-      }).join("")
-    : `<div class="empty" style="margin-top:30px"><div class="big">🎮</div><h3>No games yet</h3><p>Be the first: <a href="create.html" style="color:var(--accent);font-weight:700">add your game</a>.</p></div>`);
+  // Every game under one "Different Subjects" heading, newest first.
+  $("homeSections").innerHTML = mostPlayed + (state.games.length
+    ? `
+      <section class="home-section">
+        <div class="section-head">
+          <span class="section-icon">📚</span>
+          <h2>Different Subjects</h2>
+          <span class="result-count">${state.games.length} game${state.games.length === 1 ? "" : "s"}</span>
+        </div>
+        <div class="grid">${state.games.map((g) => cardHTML(g, state.user)).join("")}</div>
+      </section>`
+    : `<div class="empty" style="margin-top:30px"><div class="big">📚</div><h3>Nothing here yet</h3><p>Be the first: <a href="create.html" style="color:var(--accent);font-weight:700">add yours</a>.</p></div>`);
 }
 
 async function loadTop() {
