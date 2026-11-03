@@ -77,10 +77,138 @@ async function startGame() {
     }
   }
   if (!url) return toast("This game's link is broken.", true);
+  url = await withSaveTicket(url);
   $("frame").src = url;
   $("frame").classList.remove("hidden");
   $("cover").classList.add("hidden");
   $("frame").focus();
+}
+
+/* ---------- Saved progress ----------
+   Games hosted on StudySmartly run walled off, so they can't keep their own
+   saves. When you're logged in, the game's progress is sent here and saved
+   to your account, then loaded back in next time. */
+const save = { folder: "", pending: null, timer: null, last: "", savedAt: null, failed: false };
+const SAVE_EVERY = 15000; // ms between saves while playing
+
+function hostedFolder(url) {
+  const m = new URL(url, location.href).pathname.match(/^\/games\/([\w-]+)\//);
+  return m && new URL(url, location.href).origin === location.origin ? m[1] : "";
+}
+
+async function withSaveTicket(url) {
+  save.folder = hostedFolder(url);
+  if (!save.folder) return url;
+  renderSaveBar();
+  if (!user) return url;
+  try {
+    const { ticket } = await userApi(`/saves/${save.folder}/ticket`, { method: "POST" });
+    const u = new URL(url, location.href);
+    u.searchParams.set("ss_save", ticket);
+    return u.pathname + u.search + u.hash;
+  } catch {
+    save.failed = true;
+    renderSaveBar();
+    return url;
+  }
+}
+
+function renderSaveBar() {
+  const bar = $("saveBar");
+  if (!save.folder) return bar.classList.add("hidden");
+  bar.classList.remove("hidden");
+  if (!user) {
+    bar.className = "save-bar warn";
+    bar.innerHTML = `
+      <span class="save-icon">💾</span>
+      <div class="save-text"><b>Your progress won't be saved!</b>
+        <span>Log in or make an account to save your progress, bro. It's free.</span></div>
+      <div class="save-actions">
+        <a class="btn btn-primary btn-small" href="${loginURL("signup")}">Make an account</a>
+        <a class="btn btn-ghost btn-small" href="${loginURL("login")}">Log in</a>
+      </div>`;
+    return;
+  }
+  bar.className = `save-bar ${save.failed ? "warn" : "ok"}`;
+  const when = save.savedAt ? `Saved ${timeAgo(save.savedAt)}` : "Progress saves automatically";
+  bar.innerHTML = `
+    <span class="save-icon">${save.failed ? "⚠️" : "✅"}</span>
+    <div class="save-text"><b>${save.failed ? "Couldn't save just now. We'll keep trying." : `Saving to ${escapeHTML(user.username)}'s account`}</b>
+      <span>${when}</span></div>
+    <div class="save-actions"><button class="btn btn-ghost btn-small" id="resetSave">Reset progress</button></div>`;
+  $("resetSave").addEventListener("click", resetProgress);
+}
+
+function timeAgo(d) {
+  const s = Math.round((Date.now() - d) / 1000);
+  return s < 10 ? "just now" : s < 60 ? `${s}s ago` : `${Math.round(s / 60)} min ago`;
+}
+
+async function flushSave(useBeacon = false) {
+  clearTimeout(save.timer);
+  save.timer = null;
+  if (!save.pending || !user) return;
+  const body = JSON.stringify({ data: save.pending });
+  if (body === save.last) { save.pending = null; return; }
+  const data = save.pending;
+  save.pending = null;
+  try {
+    const res = await fetch(`/api/saves/${save.folder}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" },
+      body,
+      keepalive: useBeacon && body.length < 60000, // lets the save finish while leaving the page
+    });
+    if (!res.ok) throw new Error(res.status);
+    save.last = body;
+    save.savedAt = Date.now();
+    save.failed = false;
+  } catch {
+    save.pending = save.pending || data; // try again next time
+    save.failed = true;
+    if (!useBeacon) save.timer = setTimeout(flushSave, SAVE_EVERY);
+  }
+  renderSaveBar();
+}
+
+window.addEventListener("message", (e) => {
+  // Only listen to the game we're showing.
+  if (e.source !== $("frame").contentWindow || !save.folder || !e.data) return;
+  if (e.data.type === "ss-save" && user && e.data.data && typeof e.data.data === "object") {
+    save.pending = e.data.data;
+    if (!save.timer) save.timer = setTimeout(flushSave, save.savedAt ? SAVE_EVERY : 2000);
+  }
+});
+// Save right away when leaving or switching tabs.
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flushSave(true); });
+window.addEventListener("pagehide", () => flushSave(true));
+setInterval(() => { if (save.savedAt && user) renderSaveBar(); }, 30000);
+
+async function resetProgress() {
+  if (!confirm("Reset your progress in this game? This can't be undone.")) return;
+  try {
+    clearTimeout(save.timer);
+    save.timer = null;
+    save.pending = null;
+    await userApi(`/saves/${save.folder}`, { method: "DELETE" });
+    save.last = "";
+    save.savedAt = null;
+    toast("Progress reset. Restarting the game…");
+    const frame = $("frame");
+    const u = new URL(frame.getAttribute("src"), location.href);
+    u.searchParams.delete("ss_save");
+    frame.src = await withSaveTicket(u.pathname + u.search + u.hash);
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+// Show the save message before the game starts, for games hosted here.
+function previewSaveBar() {
+  if (game && !game.paid && hostedFolder(safeURL(game.url) || location.href)) {
+    save.folder = hostedFolder(game.url);
+    renderSaveBar();
+  }
 }
 
 /* ---------- Fullscreen ---------- */
@@ -139,6 +267,7 @@ $("shareBtn").addEventListener("click", async () => {
   const [games, me] = await Promise.all([fetchGames(), loadMe()]);
   user = me;
   initAccount(user);
+  setTimeout(previewSaveBar, 0);
   const current = games.find((g) => String(g.id) === new URLSearchParams(location.search).get("id"));
   initSidebar(games, current ? `category:${gameCategory(current)}` : "");
   addCreateButton();

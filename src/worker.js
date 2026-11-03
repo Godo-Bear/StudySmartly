@@ -20,6 +20,7 @@ const MAX_UPLOAD_FILES = 200;          // KV free plan: 1000 writes a day
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 40 * 1024 * 1024;
 const MAX_GAMES_PER_CREATOR = 25;
+const MAX_SAVE_BYTES = 512 * 1024;     // per player, per game
 
 export default {
   async fetch(request, env) {
@@ -92,6 +93,35 @@ async function handleApi(request, env, url) {
   }
 
   if (path.startsWith("/api/my/") || path.startsWith("/api/uploads")) return handleCreator(request, env, url, path, method);
+
+  /* ---------- Saved progress for uploaded games ---------- */
+  const save = path.match(/^\/api\/saves\/([\w-]+)(\/ticket)?$/);
+  if (save) {
+    const user = await currentUser(request, env);
+    if (!user) throw httpError(401, "Log in to save your progress.");
+    const key = `save:${user.username.toLowerCase()}:${save[1]}`;
+    if (save[2] && method === "POST") {
+      // Short-lived ticket that lets the game page load *only* this save.
+      const ticket = randomHex(24);
+      await env.DB.put(`ticket:${ticket}`, JSON.stringify({ user: user.username.toLowerCase(), folder: save[1] }), { expirationTtl: 600 });
+      return json({ ticket });
+    }
+    if (!save[2] && method === "PUT") {
+      const text = await request.text();
+      if (text.length > MAX_SAVE_BYTES) throw httpError(413, "This game's save is too big to store.");
+      let data;
+      try { data = JSON.parse(text).data; } catch { throw httpError(400, "Bad save data."); }
+      if (!data || typeof data !== "object" || Array.isArray(data) || Object.values(data).some((v) => typeof v !== "string")) {
+        throw httpError(400, "Bad save data.");
+      }
+      await env.DB.put(key, JSON.stringify(data));
+      return json({ ok: true, savedAt: new Date().toISOString() });
+    }
+    if (!save[2] && method === "DELETE") {
+      await env.DB.delete(key);
+      return json({ ok: true });
+    }
+  }
 
   return json({ error: "Not found" }, 404);
 }
@@ -247,9 +277,23 @@ function isSafePath(p) {
 // Uploaded games are served with a CSP sandbox: they run as their own
 // separate origin, so their scripts can't read StudySmartly logins.
 const SANDBOX_CSP = "sandbox allow-scripts allow-forms allow-popups allow-modals allow-pointer-lock allow-downloads allow-orientation-lock allow-presentation";
-// Sandboxed pages can't use localStorage; give games an in-memory stand-in
-// so the ones that use it still run (progress just isn't saved).
-const STORAGE_SHIM = `<script>(function(){function m(){var d={};return{getItem:function(k){k=String(k);return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},setItem:function(k,v){d[String(k)]=String(v)},removeItem:function(k){delete d[String(k)]},clear:function(){d={}},key:function(i){return Object.keys(d)[i]||null},get length(){return Object.keys(d).length}}}["localStorage","sessionStorage"].forEach(function(n){try{window[n].getItem("x")}catch(e){try{Object.defineProperty(window,n,{value:m(),configurable:true})}catch(_){}}})})();</script>`;
+// Sandboxed pages can't use the browser's localStorage, so games get a
+// stand-in. When a logged-in player opens the game, the play page passes a
+// short-lived "save ticket"; we put that player's saved progress into the
+// stand-in before the game starts, and every change is sent to the play
+// page (postMessage), which saves it to the player's account.
+function storageShim(saved) {
+  return `<script>(function(){var S=${saved ? JSON.stringify(saved).replace(/</g, "\\u003c") : "null"};` +
+    `function m(seed,sync){var d={},t;if(seed)for(var k in seed)if(Object.prototype.hasOwnProperty.call(seed,k))d[k]=String(seed[k]);` +
+    `function ch(){if(!sync)return;clearTimeout(t);t=setTimeout(function(){try{parent.postMessage({type:"ss-save",data:d},"*")}catch(e){}},400)}` +
+    `return{getItem:function(k){k=String(k);return Object.prototype.hasOwnProperty.call(d,k)?d[k]:null},` +
+    `setItem:function(k,v){k=String(k);v=String(v);if(d[k]!==v){d[k]=v;ch()}},` +
+    `removeItem:function(k){k=String(k);if(k in d){delete d[k];ch()}},clear:function(){d={};ch()},` +
+    `key:function(i){return Object.keys(d)[i]||null},get length(){return Object.keys(d).length}}}` +
+    `function use(n,st){try{window[n].getItem("x")}catch(e){try{Object.defineProperty(window,n,{value:st,configurable:true})}catch(_){}}}` +
+    `use("localStorage",m(S,S!==null));use("sessionStorage",m(null,false));` +
+    `try{parent.postMessage({type:"ss-ready",saving:S!==null},"*")}catch(e){}})();</script>`;
+}
 
 async function serveGameFile(request, env, url) {
   const m = url.pathname.match(/^\/games\/([\w-]+)\/(.*)$/);
@@ -270,10 +314,17 @@ async function serveGameFile(request, env, url) {
     "Cache-Control": "public, max-age=300",
   };
   if (type.startsWith("text/html")) {
+    // A valid save ticket for this game folder loads the player's progress.
+    let saved = null;
+    const ticket = url.searchParams.get("ss_save") || "";
+    if (/^[a-f0-9]{48}$/.test(ticket)) {
+      const t = await env.DB.get(`ticket:${ticket}`, "json");
+      if (t && t.folder === m[1]) saved = (await env.DB.get(`save:${t.user}:${m[1]}`, "json")) || {};
+    }
     let html = new TextDecoder().decode(value);
     // Put the shim right after <!doctype> so the page doesn't drop into quirks mode.
-    html = html.replace(/^(\uFEFF?\s*<!doctype[^>]*>)?/i, (d) => (d || "") + STORAGE_SHIM);
-    return new Response(html, { headers });
+    html = html.replace(/^(\uFEFF?\s*<!doctype[^>]*>)?/i, (d) => (d || "") + storageShim(saved));
+    return new Response(html, { headers: { ...headers, "Cache-Control": "no-store" } });
   }
   return new Response(value, { headers });
 }

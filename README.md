@@ -16,7 +16,9 @@ Anyone with an account can click the round **＋ Add your game** button in the b
 - **Link:** a game that's already online.
 - **Upload files:** a `.zip` of the game folder, a single `.html` file, or a whole folder.
 
-Uploaded files are stored in Cloudflare KV and served from `/games/<folder>/...`. They're served with a CSP `sandbox` header, so the game runs as a separate origin and can't read StudySmartly logins. Games that use `localStorage` still run, but their progress isn't saved between visits.
+Uploaded files are stored in Cloudflare KV and served from `/games/<folder>/...`. They're served with a CSP `sandbox` header, so the game runs as a separate origin and can't read StudySmartly logins. Because of the sandbox, games can't use the browser's own `localStorage`, so they get a stand-in:
+- **Logged in:** progress is saved to the player's account in KV (`save:<user>:<folder>`, up to 512 KB per game) and loaded back before the game starts, on any device. The play page gets a 10-minute "save ticket" that only unlocks that one player's save for that one game. It saves every ~15 seconds while playing, and right away when the player leaves. Players can also **Reset progress**.
+- **Logged out:** the game still runs, but a banner says progress won't be saved and asks them to log in or make an account.
 
 The limits are 200 files, 20 MB per file, 40 MB per game and 25 games per creator. On the free plan, KV allows about 1,000 file writes a day.
 
