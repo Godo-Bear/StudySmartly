@@ -54,6 +54,15 @@ How a player gets a paid game:
 - **⭐ Favourite** button, plus **Recently Played** and **Your Favourites** at the top of the home page, saved to their account.
 - **🚩 Report** button for broken or inappropriate games.
 
+## ✨ AI overview
+Under **About this game**, Cloudflare's free Workers AI (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`, the `AI` binding) reads the game and explains it: summary, goal, how to play, controls, tips and what it's good for.
+- **Uploaded games:** it reads the text files from KV.
+- **Link games:** it fetches the page and its scripts from the same site.
+- **Big files:** files over 40k characters, usually libraries, are skipped and listed for the AI.
+- **Saved once:** each overview is written once per game version, saved in KV (`ai:<gameId>:v<version>`), and served from there.
+- **Refresh:** the game's creator or an admin can write it again with **Refresh**.
+- **Free limit:** the free plan has a daily limit. If it runs out, the box says to try again tomorrow.
+
 ## Updating games
 - **Link games** update by themselves. StudySmartly shows the creator's own site, so changes there show here straight away.
 - **Uploaded games:** in **My games → Edit**, creators upload a new version. Plays, likes and everyone's saved progress stay, because saves belong to the game, not its files.

@@ -23,6 +23,8 @@
   // No id needed: Cloudflare creates the namespace on the first deploy.
   "kv_namespaces": [{ "binding": "DB" }],
   // Counts plays for the "Most played" section (free plan, SQLite-backed).
+  // Cloudflare's free Workers AI, for the AI overview under each game.
+  "ai": { "binding": "AI" },
   // ACCESS holds each account's TRUE/FALSE "allowed" setting.
   "durable_objects": { "bindings": [
     { "name": "PLAYS", "class_name": "PlayCounter" },

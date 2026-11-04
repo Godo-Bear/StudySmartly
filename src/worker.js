@@ -14,6 +14,7 @@
 //   (Cloudflare KV), never in the public repo.
 
 import { DurableObject } from "cloudflare:workers";
+import { writeOverview, overviewErrorMessage } from "./overview.js";
 
 const FILE_PATH = "data/games.json";
 const IMAGE_DIR = "images";
@@ -161,6 +162,40 @@ async function handleApi(request, env, url) {
     const user = await currentUser(request, env).catch(() => null);
     if (env.PLAYS) await playCounter(env).hit(hit[1], request.headers.get("CF-Connecting-IP") || "", user ? user.username.toLowerCase() : "");
     return json({ ok: true });
+  }
+
+  // ✨ AI overview: written once per game version, then served from KV
+  const ov = path.match(/^\/api\/overview\/([\w-]+)(\/refresh)?$/);
+  if (ov) {
+    const user = await approvedUser(request, env);
+    const game = await liveGame(request, env, ov[1]);
+    if (!game) throw httpError(404, "That game isn't on the site (yet).");
+    const key = `ai:${game.id}:v${game.version || 1}`;
+    if (ov[2] && method === "POST") {
+      if (!user.admin && !(game.owner && game.owner.toLowerCase() === user.username.toLowerCase())) {
+        throw httpError(403, "Only the game's creator or an admin can refresh the overview.");
+      }
+      await env.DB.delete(key);
+    } else if (method === "GET") {
+      const saved = await env.DB.get(key, "json");
+      if (saved) return json({ status: "ready", overview: saved });
+    } else {
+      throw httpError(405, "Not allowed.");
+    }
+    // Only one writer at a time; others wait and check back.
+    if (await env.DB.get(`ai-lock:${game.id}`)) return json({ status: "writing" });
+    await env.DB.put(`ai-lock:${game.id}`, "1", { expirationTtl: 180 });
+    try {
+      const link = game.paid ? (await env.DB.get(`url:${game.id}`)) || "" : game.url;
+      // Uploaded games are read from KV; link games are fetched from their site.
+      const overview = await writeOverview(env, game, link);
+      await env.DB.put(key, JSON.stringify(overview));
+      return json({ status: "ready", overview });
+    } catch (err) {
+      return json({ status: "error", message: overviewErrorMessage(err) });
+    } finally {
+      await env.DB.delete(`ai-lock:${game.id}`);
+    }
   }
 
   // 👍 / 👎
@@ -364,6 +399,17 @@ async function handleCreator(request, env, url, path, method) {
   }
 
   return json({ error: "Not found" }, 404);
+}
+
+// One game from the live (deployed) games list.
+async function liveGame(request, env, id) {
+  try {
+    const res = await env.ASSETS.fetch(new Request(new URL("/data/games.json", request.url)));
+    const games = await res.json();
+    return (Array.isArray(games) ? games : []).find((g) => g.id === id) || null;
+  } catch {
+    return null;
+  }
 }
 
 // Creators can always play their own paid games (checked against the live games list).

@@ -280,6 +280,37 @@ $("reportBtn").addEventListener("click", () => {
   });
 });
 
+/* ---------- ✨ AI overview ---------- */
+let aiTries = 0;
+function renderOverview(o) {
+  const li = (arr) => arr.map((x) => `<li>${escapeHTML(x)}</li>`).join("");
+  $("aiBody").innerHTML = `
+    ${o.summary ? `<p class="ai-summary">${escapeHTML(o.summary)}</p>` : ""}
+    ${o.goal ? `<div class="ai-block"><h3>🎯 Goal</h3><p>${escapeHTML(o.goal)}</p></div>` : ""}
+    ${o.howToPlay && o.howToPlay.length ? `<div class="ai-block"><h3>🕹️ How to play</h3><ol>${li(o.howToPlay)}</ol></div>` : ""}
+    ${o.controls && o.controls.length ? `<div class="ai-block"><h3>⌨️ Controls</h3>
+      <div class="ai-controls">${o.controls.map((c) => `<div><kbd>${escapeHTML(c.input)}</kbd><span>${escapeHTML(c.action)}</span></div>`).join("")}</div></div>` : ""}
+    ${o.tips && o.tips.length ? `<div class="ai-block"><h3>💡 Tips</h3><ul>${li(o.tips)}</ul></div>` : ""}
+    ${o.goodFor ? `<div class="ai-block"><h3>🧠 Good for</h3><p>${escapeHTML(o.goodFor)}</p></div>` : ""}`;
+}
+async function loadOverview(refresh = false) {
+  $("aiBody").innerHTML = `<div class="ai-writing"><span class="ai-spinner"></span> ${refresh ? "Rewriting" : "Loading"} the overview…</div>`;
+  try {
+    const r = await userApi(`/overview/${encodeURIComponent(game.id)}${refresh ? "/refresh" : ""}`, refresh ? { method: "POST" } : {});
+    if (r.status === "ready") { aiTries = 0; return renderOverview(r.overview); }
+    if (r.status === "writing" && aiTries++ < 20) {
+      $("aiBody").innerHTML = `<div class="ai-writing"><span class="ai-spinner"></span> The AI is reading through the game… this takes a few seconds the first time.</div>`;
+      return setTimeout(() => loadOverview(), 6000);
+    }
+    $("aiBody").innerHTML = `<p class="muted-note">${escapeHTML(r.message || "No overview yet.")}</p>
+      <button class="btn btn-ghost btn-small" id="aiRetry">Try again</button>`;
+    $("aiRetry").addEventListener("click", () => loadOverview());
+  } catch (err) {
+    $("aiBody").innerHTML = `<p class="muted-note">${escapeHTML(err.message)}</p>`;
+  }
+}
+$("aiRefresh").addEventListener("click", () => loadOverview(true));
+
 async function loadSocial() {
   try {
     const [votes, lib] = await Promise.all([userApi(`/votes/${encodeURIComponent(game.id)}`), userApi("/library")]);
@@ -351,5 +382,10 @@ $("shareBtn").addEventListener("click", async () => {
   initSidebar(games, current ? `category:${gameCategory(current)}` : "");
   addCreateButton();
   render(games);
-  if (game) loadSocial();
+  if (game) {
+    loadSocial();
+    loadOverview();
+    // The game's creator or an admin can ask for a fresh overview
+    if (user && (user.admin || isOwner(game, user))) $("aiRefresh").classList.remove("hidden");
+  }
 })();
