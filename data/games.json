@@ -50,5 +50,15 @@
     "owner": "Elnathan",
     "thumbnail": "images/20ae044e-0da6-4026-8e8e-09f848d2a8f3-mw2qak7b.webp",
     "addedAt": "2026-11-04T23:08:59.975Z"
+  },
+  {
+    "id": "4530637b-8775-46ac-acc7-4638bd3420a4",
+    "name": "Tokyo Circuit",
+    "creator": "Jayden Narayan",
+    "url": "https://tokyo-circuit-racer.jn-studios.workers.dev/",
+    "category": "Racing",
+    "description": "",
+    "thumbnail": "images/4530637b-8775-46ac-acc7-4638bd3420a4-mw2qnt4m.webp",
+    "addedAt": "2026-11-04T23:19:18.070Z"
   }
 ]
