@@ -23,6 +23,13 @@
   // No id needed: Cloudflare creates the namespace on the first deploy.
   "kv_namespaces": [{ "binding": "DB" }],
   // Counts plays for the "Most played" section (free plan, SQLite-backed).
-  "durable_objects": { "bindings": [{ "name": "PLAYS", "class_name": "PlayCounter" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PlayCounter"] }]
+  // ACCESS holds each account's TRUE/FALSE "allowed" setting.
+  "durable_objects": { "bindings": [
+    { "name": "PLAYS", "class_name": "PlayCounter" },
+    { "name": "ACCESS", "class_name": "AccessList" }
+  ] },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["PlayCounter"] },
+    { "tag": "v2", "new_sqlite_classes": ["AccessList"] }
+  ]
 }

@@ -464,7 +464,7 @@ $("myGames").addEventListener("click", async (e) => {
   if (sell) return openSell(sell.dataset.sell);
   const relock = e.target.closest("[data-relock]");
   if (relock) {
-    if (!confirm(`Lock this game again for ${relock.dataset.user}?`)) return;
+    if (!(await askConfirm(`Lock this game again for ${relock.dataset.user}?`, { yes: "Lock it" }))) return;
     try {
       await userApi(`/my/games/${encodeURIComponent(relock.dataset.relock)}/lock`, {
         method: "POST", body: JSON.stringify({ username: relock.dataset.user }),
@@ -481,7 +481,7 @@ $("myGames").addEventListener("click", async (e) => {
   const del = e.target.closest("[data-del]");
   if (!del) return;
   const g = myGames.find((x) => x.id === del.dataset.del);
-  if (!g || !confirm(`Delete “${g.name}”? This removes it from StudySmartly${isUploaded(g) ? " along with its files" : ""}.`)) return;
+  if (!g || !(await askConfirm(`Delete “${g.name}”? This removes it from StudySmartly${isUploaded(g) ? " along with its files" : ""}.`, { yes: "Delete game", danger: true }))) return;
   del.disabled = true;
   try {
     await userApi(`/my/games/${encodeURIComponent(g.id)}`, { method: "DELETE" });

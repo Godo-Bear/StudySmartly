@@ -55,7 +55,9 @@ async function handleApi(request, env, url) {
     const name = checkUsername(username);
     checkPassword(password);
     const key = `user:${name.toLowerCase()}`;
-    if (await env.DB.get(key)) throw httpError(409, "That username is taken.");
+    if ((await env.DB.get(key)) && (await accessList(env).get(name.toLowerCase()))?.status !== "deleted") {
+      throw httpError(409, "That username is taken.");
+    }
     const salt = randomHex(16);
     const user = {
       username: name, salt, iter: PBKDF2_ITERATIONS, hash: await hashPassword(password, salt), unlocked: [],
@@ -64,20 +66,23 @@ async function handleApi(request, env, url) {
       country: (request.cf && request.cf.country) || "",
     };
     await env.DB.put(key, JSON.stringify(user));
+    await accessList(env).set(name.toLowerCase(), "pending");
     await logAttempt(env, request, name, "signup");
     return json({ token: await newSession(env, name), user: publicUser(user) }, 201);
   }
 
   if (path === "/api/auth/login" && method === "POST") {
     const { username, password } = await request.json();
-    const user = await getUser(env, String(username || ""));
+    let user = await getUser(env, String(username || ""));
+    if (user && (await accessList(env).get(user.username.toLowerCase()))?.status === "deleted") user = null;
     const ok = user && (await safeEqual(await hashPassword(String(password || ""), user.salt, user.iter), user.hash));
     if (!ok) {
       await logAttempt(env, request, String(username || "").trim().slice(0, 20), user ? "wrong-password" : "no-account");
       await sleep(600);
       throw httpError(401, "Wrong username or password.");
     }
-    await logAttempt(env, request, user.username, statusOf(user) === "approved" ? "ok" : statusOf(user));
+    const status = await statusFor(env, user);
+    await logAttempt(env, request, user.username, status === "approved" ? "ok" : status);
     return json({ token: await newSession(env, user.username), user: publicUser(user) });
   }
 
@@ -90,11 +95,7 @@ async function handleApi(request, env, url) {
   if (path === "/api/me" && method === "GET") {
     const user = await currentUser(request, env);
     if (!user) throw httpError(401, "Not logged in.");
-    if (!user.lastSeen || Date.now() - new Date(user.lastSeen).getTime() > 60 * 60 * 1000) {
-      user.lastSeen = new Date().toISOString();
-      if (request.cf && request.cf.country) user.country = request.cf.country;
-      await env.DB.put(`user:${user.username.toLowerCase()}`, JSON.stringify(user));
-    }
+    await accessList(env).touch(user.username.toLowerCase(), (request.cf && request.cf.country) || "");
     return json({ user: publicUser(user) });
   }
 
@@ -495,7 +496,17 @@ async function handleAdmin(request, env, path, method) {
 
   /* ----- Player accounts (for unlocking paid games) ----- */
   if (path === "/api/admin/users" && method === "GET") {
-    return json({ users: await listUsers(env) });
+    const [all, live] = await Promise.all([listUsers(env), accessList(env).all()]);
+    const users = [];
+    for (const u of all) {
+      const row = live[u.username.toLowerCase()];
+      if (row && row.status === "deleted") continue;
+      if (row && row.status && !u.admin) u.status = row.status;
+      if (row && row.lastSeen) u.lastSeen = row.lastSeen;
+      if (row && row.country) u.country = row.country;
+      users.push(u);
+    }
+    return json({ users });
   }
 
   const u = path.match(/^\/api\/admin\/users\/([\w]+)(?:\/(unlock|lock|admin|status))?$/);
@@ -508,18 +519,16 @@ async function handleAdmin(request, env, path, method) {
       const { status } = await request.json();
       if (!["approved", "pending", "blocked"].includes(status)) throw httpError(400, "Unknown status.");
       if (status !== "approved" && me && me.username === user.username) throw httpError(400, "You can't lock your own account.");
-      user.status = status;
-      user.statusBy = me ? me.username : "admin code";
-      user.statusAt = new Date().toISOString();
-      await env.DB.put(key, JSON.stringify(user));
-      return json({ user: publicUser(user) });
+      await accessList(env).set(user.username.toLowerCase(), status);
+      return json({ user: publicUser({ ...user, _status: status }) });
     }
     if (u[2] === "admin" && method === "POST") {
       const { admin } = await request.json();
       if (!admin && me && me.username === user.username) throw httpError(400, "You can't remove your own admin. Ask another admin.");
-      if (admin) { user.admin = true; user.status = "approved"; } else delete user.admin;
+      if (admin) user.admin = true; else delete user.admin;
       await env.DB.put(key, JSON.stringify(user));
-      return json({ user: publicUser(user) });
+      if (admin) await accessList(env).set(user.username.toLowerCase(), "approved");
+      return json({ user: publicUser({ ...user, _status: await statusFor(env, user) }) });
     }
     if (u[2] && method === "POST") {
       const { gameId, paidWith, note } = await request.json();
@@ -529,6 +538,7 @@ async function handleAdmin(request, env, path, method) {
     }
     if (!u[2] && method === "DELETE") {
       if (me && me.username === user.username) throw httpError(400, "You can't delete your own account here.");
+      await accessList(env).set(user.username.toLowerCase(), "deleted");
       await env.DB.delete(key);
       return json({ ok: true });
     }
@@ -604,15 +614,28 @@ function statusOf(user) {
 function publicUser(user) {
   return {
     username: user.username, unlocked: user.unlocked, unlockInfo: user.unlockInfo || {},
-    admin: !!user.admin, status: statusOf(user), createdAt: user.createdAt,
+    admin: !!user.admin, status: user._status || statusOf(user), createdAt: user.createdAt,
     lastSeen: user.lastSeen || "", country: user.country || "",
   };
 }
+// The live TRUE/FALSE setting. It lives in its own Durable Object so it's
+// instant everywhere and no other save (last seen, unlocks…) can undo it.
+// Accounts with no entry (made before the lock) fall back to their record.
+function accessList(env) {
+  return env.ACCESS.get(env.ACCESS.idFromName("all"));
+}
+async function statusFor(env, user) {
+  if (user.admin) return "approved";
+  if (user._status) return user._status;
+  const row = await accessList(env).get(user.username.toLowerCase());
+  return (row && row.status) || statusOf(user);
+}
+
 // The logged-in account, if the owner has approved it.
 async function approvedUser(request, env) {
   const user = await currentUser(request, env);
   if (!user) throw httpError(401, "Log in to use StudySmartly.");
-  const status = statusOf(user);
+  const status = await statusFor(env, user);
   if (status === "blocked") throw httpError(403, "This account has been blocked by the owner.");
   if (status !== "approved") throw httpError(403, "The owner hasn't unlocked your account yet.");
   return user;
@@ -641,7 +664,12 @@ async function currentUser(request, env) {
   const token = bearer(request);
   if (!token) return null;
   const name = await env.DB.get(`session:${token}`);
-  return name ? getUser(env, name) : null;
+  if (!name) return null;
+  const [user, row] = await Promise.all([getUser(env, name), accessList(env).get(name)]);
+  if (!user || (row && row.status === "deleted")) return null;
+  user._status = user.admin ? "approved" : (row && row.status) || statusOf(user);
+  if (row && row.lastSeen) user.lastSeen = row.lastSeen;
+  return user;
 }
 async function hashPassword(password, saltHex, iterations = PBKDF2_ITERATIONS) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
@@ -847,5 +875,38 @@ export class PlayCounter extends DurableObject {
 
   async top(n) {
     return this.sql.exec("SELECT id, count FROM plays ORDER BY count DESC LIMIT ?", n).toArray();
+  }
+}
+
+export class AccessList extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
+    this.sql.exec("CREATE TABLE IF NOT EXISTS access (username TEXT PRIMARY KEY, status TEXT, updated TEXT, last_seen TEXT, country TEXT)");
+  }
+  async get(username) {
+    const r = this.sql.exec("SELECT status, last_seen, country FROM access WHERE username = ?", username).toArray()[0];
+    return r ? { status: r.status, lastSeen: r.last_seen || "", country: r.country || "" } : null;
+  }
+  async set(username, status) {
+    this.sql.exec(`INSERT INTO access (username, status, updated) VALUES (?, ?, ?)
+      ON CONFLICT(username) DO UPDATE SET status = excluded.status, updated = excluded.updated`,
+      username, status, new Date().toISOString());
+  }
+  // "Last on": at most one write every 5 minutes per account.
+  async touch(username, country) {
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 5 * 60 * 1000).toISOString();
+    this.sql.exec(`INSERT INTO access (username, last_seen, country) VALUES (?, ?, ?)
+      ON CONFLICT(username) DO UPDATE SET last_seen = excluded.last_seen, country = COALESCE(NULLIF(excluded.country, ''), country)
+      WHERE last_seen IS NULL OR last_seen < ?`,
+      username, now.toISOString(), country, cutoff);
+  }
+  async all() {
+    const out = {};
+    for (const r of this.sql.exec("SELECT username, status, last_seen, country FROM access").toArray()) {
+      out[r.username] = { status: r.status, lastSeen: r.last_seen || "", country: r.country || "" };
+    }
+    return out;
   }
 }

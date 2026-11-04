@@ -368,3 +368,35 @@ function siteGate(user) {
   });
   return false;
 }
+
+/* ---------- "Are you sure?" pop-up ----------
+   Our own instead of the browser's confirm(), which some browsers and
+   home-screen apps silently block (so the button seemed to do nothing). */
+function askConfirm(message, { yes = "Yes", danger = false } = {}) {
+  return new Promise((resolve) => {
+    const wrap = document.createElement("div");
+    wrap.className = "ask-backdrop";
+    wrap.innerHTML = `
+      <div class="ask-box" role="alertdialog" aria-modal="true" aria-labelledby="askMsg">
+        <p id="askMsg">${escapeHTML(message)}</p>
+        <div class="ask-buttons">
+          <button class="btn btn-ghost" data-ask="no">Cancel</button>
+          <button class="btn ${danger ? "btn-danger-solid" : "btn-primary"}" data-ask="yes">${escapeHTML(yes)}</button>
+        </div>
+      </div>`;
+    const done = (answer) => {
+      wrap.remove();
+      document.removeEventListener("keydown", onKey);
+      resolve(answer);
+    };
+    const onKey = (e) => { if (e.key === "Escape") done(false); };
+    wrap.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-ask]");
+      if (b) done(b.dataset.ask === "yes");
+      else if (e.target === wrap) done(false);
+    });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(wrap);
+    wrap.querySelector('[data-ask="yes"]').focus();
+  });
+}

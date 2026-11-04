@@ -249,7 +249,7 @@ function renderPending() {
         return `<tr>
           <td class="name">${escapeHTML(u.username)}${u.admin ? ` <span class="admin-tag">ADMIN</span>` : ""}</td>
           <td>${u.admin
-            ? `<span class="bool true locked" title="Admins are always allowed">TRUE</span>`
+            ? `<button class="bool true locked" data-admin-note="${escapeHTML(u.username)}" title="Admins are always allowed">TRUE</button>`
             : `<button class="bool ${allowed ? "true" : "false"}" data-set-status="${allowed ? "pending" : "approved"}" data-user="${escapeHTML(u.username)}"
                  title="${allowed ? "Click to take access away" : "Click to let them on"}">${allowed ? "TRUE" : "FALSE"}</button>`}</td>
           <td>${ago(u.createdAt)}${u.country ? ` · ${flag(u.country)}` : ""}</td>
@@ -260,7 +260,7 @@ function renderPending() {
 }
 
 async function setStatus(username, status) {
-  if (status !== "approved" && !confirm(`Take ${username}'s access away? They won't be able to get on StudySmartly until you set them back to TRUE.`)) return;
+  document.querySelectorAll(`[data-set-status][data-user="${CSS.escape(username)}"]`).forEach((b) => { b.disabled = true; b.textContent = "…"; });
   try {
     const { user } = await api(`/users/${encodeURIComponent(username)}/status`, { method: "POST", body: JSON.stringify({ status }) });
     users = users.map((u) => (u.username === user.username ? user : u));
@@ -268,6 +268,7 @@ async function setStatus(username, status) {
     toast(status === "approved" ? `${username}: TRUE. They can get on now ✅` : `${username}: FALSE. Access taken away`);
   } catch (err) {
     if (!handleAuthError(err)) toast(err.message, true);
+    renderUsers();
   }
 }
 
@@ -303,6 +304,8 @@ function renderLogins() {
 $("loginFilter").addEventListener("change", renderLogins);
 $("refreshLoginsBtn").addEventListener("click", loadLogins);
 $("pendingRows").addEventListener("click", (e) => {
+  const note = e.target.closest("[data-admin-note]");
+  if (note) return toast(`${note.dataset.adminNote} is an admin, so they're always TRUE. Click "Remove admin" on their account first.`, true);
   const b = e.target.closest("[data-set-status]");
   if (b) setStatus(b.dataset.user, b.dataset.setStatus);
 });
@@ -421,15 +424,15 @@ $("userRows").addEventListener("click", async (e) => {
   const lockBtn = e.target.closest("[data-lock]");
   if (lockBtn) {
     const g = games.find((x) => x.id === lockBtn.dataset.game);
-    if (!confirm(`Lock “${g ? g.name : "this game"}” for ${lockBtn.dataset.lock} again?`)) return;
+    if (!(await askConfirm(`Lock “${g ? g.name : "this game"}” for ${lockBtn.dataset.lock} again?`, { yes: "Lock it" }))) return;
     return setUnlock(lockBtn.dataset.lock, lockBtn.dataset.game, false);
   }
   const adminBtn = e.target.closest("[data-admin]");
   if (adminBtn) {
     const name = adminBtn.dataset.admin, make = adminBtn.dataset.make === "1";
-    if (!confirm(make
+    if (!(await askConfirm(make
       ? `Make ${name} an admin? They'll be able to add/delete games, unlock paid games and manage accounts.`
-      : `Remove admin from ${name}?`)) return;
+      : `Remove admin from ${name}?`, { yes: make ? "Make admin" : "Remove admin" }))) return;
     try {
       const { user } = await api(`/users/${encodeURIComponent(name)}/admin`, { method: "POST", body: JSON.stringify({ admin: make }) });
       users = users.map((u) => (u.username === user.username ? user : u));
@@ -445,7 +448,7 @@ $("userRows").addEventListener("click", async (e) => {
   const delBtn = e.target.closest("[data-del-user]");
   if (delBtn) {
     const name = delBtn.dataset.delUser;
-    if (!confirm(`Delete the account “${name}”? They will lose every game unlocked for them.`)) return;
+    if (!(await askConfirm(`Delete the account “${name}”? They'll be logged out and lose every game unlocked for them.`, { yes: "Delete account", danger: true }))) return;
     try {
       await api(`/users/${encodeURIComponent(name)}`, { method: "DELETE" });
       users = users.filter((u) => u.username !== name);
@@ -532,7 +535,7 @@ $("gameRows").addEventListener("click", async (e) => {
   if (!delBtn) return;
   const id = delBtn.dataset.del;
   const g = games.find((x) => String(x.id) === id);
-  if (!g || !confirm(`Delete “${g.name}” by ${g.creator}?`)) return;
+  if (!g || !(await askConfirm(`Delete “${g.name}” by ${g.creator}?`, { yes: "Delete game", danger: true }))) return;
 
   setBusy(true);
   setStatus("Deleting…");

@@ -187,7 +187,7 @@ window.addEventListener("pagehide", () => flushSave(true));
 setInterval(() => { if (save.savedAt && user) renderSaveBar(); }, 30000);
 
 async function resetProgress() {
-  if (!confirm("Reset your progress in this game? This can't be undone.")) return;
+  if (!(await askConfirm("Reset your progress in this game? This can't be undone.", { yes: "Reset", danger: true }))) return;
   try {
     clearTimeout(save.timer);
     save.timer = null;
