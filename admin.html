@@ -117,9 +117,9 @@
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
           <h2 style="margin:0">🛡️ Who can get on <span id="pendingCount" class="count-bubble" title="Waiting">0</span></h2>
         </div>
-        <p class="sub">Every new account starts on <b>FALSE</b>. Click it to set it to <b>TRUE</b> and let them on. Click TRUE to take access away again.</p>
+        <p class="sub"><b>Creator</b> decides who can add games: forever, for a set time, or not at all. Every new account starts on <b>FALSE</b>. Click it to set it to <b>TRUE</b> and let them on. Click TRUE to take access away again.</p>
         <div class="table-wrap"><table class="access-table">
-          <thead><tr><th>Username</th><th>Allowed</th><th>Signed up</th><th>Last on</th></tr></thead>
+          <thead><tr><th>Username</th><th>Allowed</th><th>Creator</th><th>Signed up</th><th>Last on</th></tr></thead>
           <tbody id="pendingRows"><tr><td colspan="4" class="muted-note">Loading…</td></tr></tbody>
         </table></div>
       </div>
@@ -181,6 +181,15 @@
           <input id="userSearch" type="search" placeholder="Search usernames…" autocomplete="off">
         </div>
         <div id="userRows"></div>
+      </div>
+
+      <div class="panel" id="reportsPanel">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <h2 style="margin:0">🚩 Reports <span id="reportCount" class="count-bubble zero">0</span></h2>
+          <button class="btn btn-ghost btn-small" id="refreshReportsBtn" style="margin-left:auto">↻ Refresh</button>
+        </div>
+        <p class="sub">Games players reported as broken or inappropriate. Check the game, fix or delete it, then mark the report done.</p>
+        <div id="reportRows"><p class="muted-note">Loading…</p></div>
       </div>
 
       <div class="panel">

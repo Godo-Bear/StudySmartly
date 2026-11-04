@@ -9,6 +9,8 @@ const state = {
   creator: params.get("creator") || "",
   query: (params.get("q") || "").trim(),
   top: [], // [{ id, count }] most played
+  rated: [], // [{ id, up, down }] top rated
+  library: { recent: [], favs: [] }, // this player's recently played + favourites
 };
 const $ = (id) => document.getElementById(id);
 
@@ -74,6 +76,18 @@ function renderHomeSections() {
   // 🔥 Most played first (only games that still exist and have been played)
   const byId = new Map(state.games.map((g) => [g.id, g]));
   const top = state.top.filter((t) => t.count > 0 && byId.has(t.id)).slice(0, PER_SECTION);
+  // Recently played + favourites (yours), and 👍 top rated
+  const section = (icon, title, list, extra = "", opts = () => ({})) => list.length ? `
+    <section class="home-section">
+      <div class="section-head"><span class="section-icon">${icon}</span><h2>${title}</h2>${extra}</div>
+      <div class="grid">${list.map((g, i) => cardHTML(g, state.user, opts(g, i))).join("")}</div>
+    </section>` : "";
+  const pick = (ids) => ids.map((id) => byId.get(id)).filter(Boolean);
+  const recent = section("🕹️", "Recently Played", pick(state.library.recent).slice(0, PER_SECTION));
+  const favs = section("⭐", "Your Favourites", pick(state.library.favs), `<span class="result-count">${state.library.favs.filter((id) => byId.has(id)).length}</span>`);
+  const rated = state.rated.filter((r) => byId.has(r.id)).slice(0, PER_SECTION);
+  const topRated = section("👍", "Top Rated", rated.map((r) => byId.get(r.id)), "",
+    (g, i) => ({ likes: rated[i].up }));
   const mostPlayed = top.length ? `
     <section class="home-section most-played">
       <div class="section-head">
@@ -84,7 +98,7 @@ function renderHomeSections() {
       <div class="grid">${top.map((t, i) => cardHTML(byId.get(t.id), state.user, { plays: t.count, rank: i + 1 })).join("")}</div>
     </section>` : "";
   // Every game under one "Different Subjects" heading, newest first.
-  $("homeSections").innerHTML = mostPlayed + (state.games.length
+  $("homeSections").innerHTML = recent + favs + mostPlayed + topRated + (state.games.length
     ? `
       <section class="home-section">
         <div class="section-head">
@@ -98,10 +112,11 @@ function renderHomeSections() {
 }
 
 async function loadTop() {
-  try {
-    const res = await fetch("/api/plays/top");
-    if (res.ok) state.top = (await res.json()).top || [];
-  } catch {}
+  await Promise.all([
+    fetch("/api/plays/top").then((r) => r.ok && r.json()).then((d) => { if (d) state.top = d.top || []; }).catch(() => {}),
+    userApi("/votes/top").then((d) => { state.rated = d.top || []; }).catch(() => {}),
+    userApi("/library").then((d) => { state.library = d; }).catch(() => {}),
+  ]);
 }
 
 function render() {

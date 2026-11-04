@@ -65,7 +65,7 @@ async function handleApi(request, env, url) {
       createdAt: new Date().toISOString(), lastSeen: new Date().toISOString(),
       country: (request.cf && request.cf.country) || "",
     };
-    await env.DB.put(key, JSON.stringify(user));
+    await env.DB.put(key, JSON.stringify(cleanRecord(user)));
     await accessList(env).set(name.toLowerCase(), "pending");
     await logAttempt(env, request, name, "signup");
     return json({ token: await newSession(env, name), user: publicUser(user) }, 201);
@@ -73,16 +73,44 @@ async function handleApi(request, env, url) {
 
   if (path === "/api/auth/login" && method === "POST") {
     const { username, password } = await request.json();
+    const lockName = String(username || "").trim().toLowerCase().slice(0, 20);
+    // 10 wrong passwords in a row locks that username for 15 minutes.
+    const lockedFor = await accessList(env).lockedFor(lockName);
+    if (lockedFor > 0) {
+      await logAttempt(env, request, lockName, "locked");
+      throw httpError(429, `Too many wrong passwords. Try again in ${Math.ceil(lockedFor / 60)} min.`);
+    }
     let user = await getUser(env, String(username || ""));
     if (user && (await accessList(env).get(user.username.toLowerCase()))?.status === "deleted") user = null;
     const ok = user && (await safeEqual(await hashPassword(String(password || ""), user.salt, user.iter), user.hash));
     if (!ok) {
+      const left = await accessList(env).loginFailed(lockName);
       await logAttempt(env, request, String(username || "").trim().slice(0, 20), user ? "wrong-password" : "no-account");
       await sleep(600);
-      throw httpError(401, "Wrong username or password.");
+      throw httpError(401, left > 0 && left <= 3
+        ? `Wrong username or password. ${left} more ${left === 1 ? "try" : "tries"} before it's locked for 15 minutes.`
+        : left === 0 ? "Too many wrong passwords. Try again in 15 min." : "Wrong username or password.");
     }
+    await accessList(env).loginOk(lockName);
     const status = await statusFor(env, user);
     await logAttempt(env, request, user.username, status === "approved" ? "ok" : status);
+    return json({ token: await newSession(env, user.username), user: publicUser(user), mustChange: !!user.mustChange });
+  }
+
+  // Change your own password (also used after an admin reset).
+  if (path === "/api/auth/password" && method === "POST") {
+    const user = await currentUser(request, env);
+    if (!user) throw httpError(401, "Log in first.");
+    const { current, password } = await request.json();
+    if (!(await safeEqual(await hashPassword(String(current || ""), user.salt, user.iter), user.hash))) {
+      await sleep(600);
+      throw httpError(400, "Your current password isn't right.");
+    }
+    checkPassword(password);
+    if (password === current) throw httpError(400, "Pick a different password from the old one.");
+    await setPassword(env, user, password);
+    delete user.mustChange;
+    await env.DB.put(`user:${user.username.toLowerCase()}`, JSON.stringify(cleanRecord(user)));
     return json({ token: await newSession(env, user.username), user: publicUser(user) });
   }
 
@@ -130,19 +158,70 @@ async function handleApi(request, env, url) {
   }
   const hit = path.match(/^\/api\/plays\/([\w-]+)$/);
   if (hit && method === "POST") {
-    if (env.PLAYS) await playCounter(env).hit(hit[1], request.headers.get("CF-Connecting-IP") || "");
+    const user = await currentUser(request, env).catch(() => null);
+    if (env.PLAYS) await playCounter(env).hit(hit[1], request.headers.get("CF-Connecting-IP") || "", user ? user.username.toLowerCase() : "");
+    return json({ ok: true });
+  }
+
+  // 👍 / 👎
+  if (path === "/api/votes/top" && method === "GET") {
+    await approvedUser(request, env);
+    return json({ top: await playCounter(env).topRated(24) });
+  }
+  const vote = path.match(/^\/api\/votes\/([\w-]+)$/);
+  if (vote) {
+    const user = await approvedUser(request, env);
+    if (method === "POST") {
+      const { v } = await request.json();
+      if (![1, -1, 0].includes(v)) throw httpError(400, "Bad vote.");
+      await playCounter(env).vote(vote[1], user.username.toLowerCase(), v);
+    }
+    return json(await playCounter(env).votes(vote[1], user.username.toLowerCase()));
+  }
+
+  // Recently played + favourites
+  if (path === "/api/library" && method === "GET") {
+    const user = await approvedUser(request, env);
+    return json(await playCounter(env).library(user.username.toLowerCase()));
+  }
+  const fav = path.match(/^\/api\/favs\/([\w-]+)$/);
+  if (fav && method === "POST") {
+    const user = await approvedUser(request, env);
+    const { on } = await request.json();
+    await playCounter(env).setFav(user.username.toLowerCase(), fav[1], !!on);
+    return json({ on: !!on });
+  }
+
+  // 🚩 Report a game
+  const report = path.match(/^\/api\/reports\/([\w-]+)$/);
+  if (report && method === "POST") {
+    const user = await approvedUser(request, env);
+    const { reason, note } = await request.json();
+    if (!["broken", "inappropriate", "other"].includes(reason)) throw httpError(400, "Pick a reason.");
+    const ok = await playCounter(env).report(report[1], user.username, reason, String(note || "").trim().slice(0, 300));
+    if (!ok) throw httpError(429, "You already reported this game. An admin will look at it.");
     return json({ ok: true });
   }
 
   /* ---------- Saved progress for uploaded games ---------- */
+  // /api/saves/<gameId>: saves belong to the game, not its file folder, so a
+  // new uploaded version keeps everyone's progress.
   const save = path.match(/^\/api\/saves\/([\w-]+)(\/ticket)?$/);
   if (save) {
     const user = await approvedUser(request, env);
-    const key = `save:${user.username.toLowerCase()}:${save[1]}`;
+    const who = user.username.toLowerCase();
+    const key = `save2:${save[1]}:${who}`;
     if (save[2] && method === "POST") {
+      const { folder } = await request.json().catch(() => ({}));
+      if (!/^[\w-]+$/.test(String(folder || ""))) throw httpError(400, "Missing game folder.");
+      // Progress saved before saves moved to per-game keys
+      if (!(await env.DB.get(key))) {
+        const old = await env.DB.get(`save:${who}:${folder}`);
+        if (old) await env.DB.put(key, old);
+      }
       // Short-lived ticket that lets the game page load *only* this save.
       const ticket = randomHex(24);
-      await env.DB.put(`ticket:${ticket}`, JSON.stringify({ user: user.username.toLowerCase(), folder: save[1] }), { expirationTtl: 600 });
+      await env.DB.put(`ticket:${ticket}`, JSON.stringify({ user: who, game: save[1], folder }), { expirationTtl: 600 });
       return json({ ticket });
     }
     if (!save[2] && method === "PUT") {
@@ -179,6 +258,7 @@ async function handleCreator(request, env, url, path, method) {
 
   // 1. Reserve an upload: say which files are coming.
   if (path === "/api/uploads" && method === "POST") {
+    requireCreator(user);
     const { files } = await request.json();
     const list = checkFileList(files);
     const id = crypto.randomUUID();
@@ -200,6 +280,7 @@ async function handleCreator(request, env, url, path, method) {
 
   // 3. Publish a game: a link, or a finished upload.
   if (path === "/api/my/games" && method === "POST") {
+    requireCreator(user);
     const body = await request.json();
     const { games: existing } = await readGames(env);
     if (!user.admin && existing.filter(isMine).length >= MAX_GAMES_PER_CREATOR) {
@@ -251,11 +332,29 @@ async function handleCreator(request, env, url, path, method) {
 
     if (!mine[2] && method === "PUT") {
       const body = await request.json();
-      // Uploaded games keep their files; only the details change.
+      // Uploaded games keep their files unless a new version was uploaded.
       const privateUrl = game.paid ? await env.DB.get(`url:${game.id}`) : game.url;
-      if (String(privateUrl || "").startsWith("/games/")) body.url = privateUrl;
+      let oldFolder = "";
+      if (String(privateUrl || "").startsWith("/games/")) {
+        body.url = privateUrl;
+        if (body.uploadId) {
+          const folder = String(body.uploadId);
+          const upload = await getUpload(env, folder, user);
+          const entry = String(body.entry || "");
+          if (!(entry in upload.files) || !/\.html?$/i.test(entry)) throw httpError(400, "Pick the HTML file that starts the game.");
+          const stored = await env.DB.list({ prefix: `file:${folder}/` });
+          if (stored.keys.length < Object.keys(upload.files).length) throw httpError(400, "Some files didn't finish uploading. Try again.");
+          body.url = `/games/${folder}/${entry.split("/").map(encodeURIComponent).join("/")}`;
+          oldFolder = (String(privateUrl).match(/^\/games\/([\w-]+)\//) || [])[1] || "";
+        }
+      }
       const data = clean({ ...body, creator: body.creator || user.username });
+      if (body.uploadId) data.version = (game.version || 1) + 1;
       await updateGame(env, game.id, data, checkImage(body.image));
+      if (body.uploadId) {
+        await env.DB.delete(`upload:${body.uploadId}`);
+        if (oldFolder && oldFolder !== body.uploadId) await deleteGameFiles(env, oldFolder);
+      }
       return json({ ok: true });
     }
     if (!mine[2] && method === "DELETE") {
@@ -357,7 +456,9 @@ async function serveGameFile(request, env, url) {
     const ticket = url.searchParams.get("ss_save") || "";
     if (/^[a-f0-9]{48}$/.test(ticket)) {
       const t = await env.DB.get(`ticket:${ticket}`, "json");
-      if (t && t.folder === m[1]) saved = (await env.DB.get(`save:${t.user}:${m[1]}`, "json")) || {};
+      if (t && t.folder === m[1]) {
+        saved = (await env.DB.get(t.game ? `save2:${t.game}:${t.user}` : `save:${t.user}:${m[1]}`, "json")) || {};
+      }
     }
     let html = new TextDecoder().decode(value);
     // Put the shim right after <!doctype> so the page doesn't drop into quirks mode.
@@ -489,6 +590,15 @@ async function handleAdmin(request, env, path, method) {
     return json({ games: await withPrivateUrls(env, games) });
   }
 
+  if (path === "/api/admin/reports" && method === "GET") {
+    return json({ reports: await playCounter(env).reports() });
+  }
+  const rr = path.match(/^\/api\/admin\/reports\/(\d+)\/resolve$/);
+  if (rr && method === "POST") {
+    await playCounter(env).resolveReport(Number(rr[1]), me ? me.username : "admin code");
+    return json({ ok: true });
+  }
+
   if (path === "/api/admin/logins" && method === "GET") {
     const page = await env.DB.list({ prefix: "log:", limit: 200 });
     return json({ logins: page.keys.map((k) => k.metadata).filter(Boolean) });
@@ -504,17 +614,40 @@ async function handleAdmin(request, env, path, method) {
       if (row && row.status && !u.admin) u.status = row.status;
       if (row && row.lastSeen) u.lastSeen = row.lastSeen;
       if (row && row.country) u.country = row.country;
+      u.creatorUntil = (row && row.creatorUntil) || 0;
+      u.creator = !!u.admin || creatorActive(u.creatorUntil);
       users.push(u);
     }
     return json({ users });
   }
 
-  const u = path.match(/^\/api\/admin\/users\/([\w]+)(?:\/(unlock|lock|admin|status))?$/);
+  const u = path.match(/^\/api\/admin\/users\/([\w]+)(?:\/(unlock|lock|admin|status|password|creator))?$/);
   if (u) {
     const user = await getUser(env, u[1]);
     if (!user) throw httpError(404, "That account doesn't exist.");
     const key = `user:${user.username.toLowerCase()}`;
+    user._creatorUntil = ((await accessList(env).get(user.username.toLowerCase())) || {}).creatorUntil || 0;
 
+    if (u[2] === "creator" && method === "POST") {
+      // days: 0 = take it away, -1 = forever, otherwise that many days from now
+      const { days } = await request.json();
+      const d = Number(days);
+      if (!Number.isFinite(d) || d < -1 || d > 3650) throw httpError(400, "Pick how long.");
+      const until = d === -1 ? -1 : d === 0 ? 0 : Date.now() + d * 24 * 60 * 60 * 1000;
+      await accessList(env).setCreator(user.username.toLowerCase(), until);
+      return json({ user: publicUser({ ...user, _status: await statusFor(env, user), _creatorUntil: until }) });
+    }
+    if (u[2] === "password" && method === "POST") {
+      // A readable temporary password; they choose their own at next log in.
+      const words = ["maple", "rocket", "tiger", "comet", "pixel", "river", "cloud", "lemon", "orbit", "zebra", "panda", "storm"];
+      const pick = () => words[crypto.getRandomValues(new Uint32Array(1))[0] % words.length];
+      const temp = `${pick()}-${pick()}-${100 + (crypto.getRandomValues(new Uint32Array(1))[0] % 900)}`;
+      await setPassword(env, user, temp);
+      user.mustChange = true;
+      await env.DB.put(key, JSON.stringify(cleanRecord(user)));
+      await accessList(env).loginOk(user.username.toLowerCase()); // clear any lockout
+      return json({ temp });
+    }
     if (u[2] === "status" && method === "POST") {
       const { status } = await request.json();
       if (!["approved", "pending", "blocked"].includes(status)) throw httpError(400, "Unknown status.");
@@ -526,7 +659,7 @@ async function handleAdmin(request, env, path, method) {
       const { admin } = await request.json();
       if (!admin && me && me.username === user.username) throw httpError(400, "You can't remove your own admin. Ask another admin.");
       if (admin) user.admin = true; else delete user.admin;
-      await env.DB.put(key, JSON.stringify(user));
+      await env.DB.put(key, JSON.stringify(cleanRecord(user)));
       if (admin) await accessList(env).set(user.username.toLowerCase(), "approved");
       return json({ user: publicUser({ ...user, _status: await statusFor(env, user) }) });
     }
@@ -562,7 +695,7 @@ async function setUnlock(env, user, gameId, unlock, { by, paidWith, note } = {})
       note: String(note || "").trim().slice(0, 100),
     };
   }
-  await env.DB.put(`user:${user.username.toLowerCase()}`, JSON.stringify(user));
+  await env.DB.put(`user:${user.username.toLowerCase()}`, JSON.stringify(cleanRecord(user)));
   return user;
 }
 
@@ -615,6 +748,8 @@ function publicUser(user) {
   return {
     username: user.username, unlocked: user.unlocked, unlockInfo: user.unlockInfo || {},
     admin: !!user.admin, status: user._status || statusOf(user), createdAt: user.createdAt,
+    creator: !!user.admin || creatorActive(user._creatorUntil || 0), creatorUntil: user._creatorUntil || 0,
+    mustChange: !!user.mustChange,
     lastSeen: user.lastSeen || "", country: user.country || "",
   };
 }
@@ -631,6 +766,17 @@ async function statusFor(env, user) {
   return (row && row.status) || statusOf(user);
 }
 
+// Creator access: admins always; others while an admin has it switched on.
+function creatorActive(until) {
+  return until === -1 || (until > 0 && until > Date.now());
+}
+function isCreator(user) {
+  return !!user.admin || creatorActive(user._creatorUntil || 0);
+}
+function requireCreator(user) {
+  if (!isCreator(user)) throw httpError(403, "Only creator accounts can add games. Ask an admin to make your account a creator account.");
+}
+
 // The logged-in account, if the owner has approved it.
 async function approvedUser(request, env) {
   const user = await currentUser(request, env);
@@ -638,6 +784,7 @@ async function approvedUser(request, env) {
   const status = await statusFor(env, user);
   if (status === "blocked") throw httpError(403, "This account has been blocked by the owner.");
   if (status !== "approved") throw httpError(403, "The owner hasn't unlocked your account yet.");
+  if (user.mustChange) throw httpError(403, "Choose a new password first (your password was reset).");
   return user;
 }
 async function listUsers(env) {
@@ -653,8 +800,20 @@ async function listUsers(env) {
 }
 async function newSession(env, username) {
   const token = randomHex(32);
-  await env.DB.put(`session:${token}`, username.toLowerCase(), { expirationTtl: SESSION_TTL });
+  await env.DB.put(`session:${token}`, JSON.stringify({ u: username.toLowerCase(), t: Date.now() }), { expirationTtl: SESSION_TTL });
   return token;
+}
+// New password: sessions made before now stop working.
+async function setPassword(env, user, password) {
+  user.salt = randomHex(16);
+  user.iter = PBKDF2_ITERATIONS;
+  user.hash = await hashPassword(password, user.salt);
+  user.pwChangedAt = Date.now();
+}
+// Strip the per-request extras before saving an account record.
+function cleanRecord(user) {
+  const { _status, _creatorUntil, ...rest } = user;
+  return rest;
 }
 function bearer(request) {
   const m = (request.headers.get("Authorization") || "").match(/^Bearer ([a-f0-9]{64})$/);
@@ -663,11 +822,15 @@ function bearer(request) {
 async function currentUser(request, env) {
   const token = bearer(request);
   if (!token) return null;
-  const name = await env.DB.get(`session:${token}`);
-  if (!name) return null;
+  const raw = await env.DB.get(`session:${token}`);
+  if (!raw) return null;
+  let name = raw, made = 0; // older sessions are just the username
+  if (raw.startsWith("{")) { try { const v = JSON.parse(raw); name = v.u; made = v.t || 0; } catch { return null; } }
   const [user, row] = await Promise.all([getUser(env, name), accessList(env).get(name)]);
   if (!user || (row && row.status === "deleted")) return null;
+  if (user.pwChangedAt && made < user.pwChangedAt) return null; // logged out by a password change
   user._status = user.admin ? "approved" : (row && row.status) || statusOf(user);
+  user._creatorUntil = (row && row.creatorUntil) || 0;
   if (row && row.lastSeen) user.lastSeen = row.lastSeen;
   return user;
 }
@@ -860,11 +1023,20 @@ export class PlayCounter extends DurableObject {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.sql.exec("CREATE TABLE IF NOT EXISTS plays (id TEXT PRIMARY KEY, count INTEGER NOT NULL DEFAULT 0)");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS votes (game TEXT NOT NULL, user TEXT NOT NULL, v INTEGER NOT NULL, PRIMARY KEY (game, user))");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS recent (user TEXT NOT NULL, game TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (user, game))");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS favs (user TEXT NOT NULL, game TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (user, game))");
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, game TEXT NOT NULL, user TEXT NOT NULL,
+      reason TEXT NOT NULL, note TEXT, at TEXT NOT NULL, resolved_by TEXT, resolved_at TEXT)`);
     this.recent = new Map(); // "ip|game" -> time, to ignore spam clicks
   }
 
-  async hit(id, ip) {
+  async hit(id, ip, user) {
     if (!/^[\w-]{1,64}$/.test(id)) return;
+    if (user) {
+      this.sql.exec("INSERT INTO recent (user, game, at) VALUES (?, ?, ?) ON CONFLICT(user, game) DO UPDATE SET at = excluded.at", user, id, Date.now());
+      this.sql.exec("DELETE FROM recent WHERE user = ? AND game NOT IN (SELECT game FROM recent WHERE user = ? ORDER BY at DESC LIMIT 20)", user, user);
+    }
     const key = `${ip}|${id}`;
     const now = Date.now();
     if (ip && now - (this.recent.get(key) || 0) < 30 * 60 * 1000) return;
@@ -876,6 +1048,45 @@ export class PlayCounter extends DurableObject {
   async top(n) {
     return this.sql.exec("SELECT id, count FROM plays ORDER BY count DESC LIMIT ?", n).toArray();
   }
+
+  async vote(game, user, v) {
+    if (v === 0) this.sql.exec("DELETE FROM votes WHERE game = ? AND user = ?", game, user);
+    else this.sql.exec("INSERT INTO votes (game, user, v) VALUES (?, ?, ?) ON CONFLICT(game, user) DO UPDATE SET v = excluded.v", game, user, v);
+  }
+  async votes(game, user) {
+    const r = this.sql.exec("SELECT SUM(v = 1) AS up, SUM(v = -1) AS down FROM votes WHERE game = ?", game).toArray()[0] || {};
+    const mine = this.sql.exec("SELECT v FROM votes WHERE game = ? AND user = ?", game, user).toArray()[0];
+    return { up: r.up || 0, down: r.down || 0, mine: mine ? mine.v : 0 };
+  }
+  async topRated(n) {
+    return this.sql.exec(`SELECT game AS id, SUM(v = 1) AS up, SUM(v = -1) AS down FROM votes GROUP BY game
+      HAVING up > 0 ORDER BY (up - down) DESC, up DESC LIMIT ?`, n).toArray();
+  }
+
+  async library(user) {
+    const recent = this.sql.exec("SELECT game FROM recent WHERE user = ? ORDER BY at DESC LIMIT 12", user).toArray().map((r) => r.game);
+    const favs = this.sql.exec("SELECT game FROM favs WHERE user = ? ORDER BY at DESC", user).toArray().map((r) => r.game);
+    return { recent, favs };
+  }
+  async setFav(user, game, on) {
+    if (on) this.sql.exec("INSERT OR IGNORE INTO favs (user, game, at) VALUES (?, ?, ?)", user, game, Date.now());
+    else this.sql.exec("DELETE FROM favs WHERE user = ? AND game = ?", user, game);
+  }
+
+  // One open report per person per game.
+  async report(game, user, reason, note) {
+    const open = this.sql.exec("SELECT id FROM reports WHERE game = ? AND lower(user) = lower(?) AND resolved_at IS NULL", game, user).toArray()[0];
+    if (open) return false;
+    this.sql.exec("INSERT INTO reports (game, user, reason, note, at) VALUES (?, ?, ?, ?, ?)", game, user, reason, note, new Date().toISOString());
+    return true;
+  }
+  async reports() {
+    return this.sql.exec(`SELECT id, game, user, reason, note, at, resolved_by AS resolvedBy, resolved_at AS resolvedAt FROM reports
+      ORDER BY resolved_at IS NOT NULL, id DESC LIMIT 200`).toArray();
+  }
+  async resolveReport(id, by) {
+    this.sql.exec("UPDATE reports SET resolved_by = ?, resolved_at = ? WHERE id = ?", by, new Date().toISOString(), id);
+  }
 }
 
 export class AccessList extends DurableObject {
@@ -883,15 +1094,39 @@ export class AccessList extends DurableObject {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.sql.exec("CREATE TABLE IF NOT EXISTS access (username TEXT PRIMARY KEY, status TEXT, updated TEXT, last_seen TEXT, country TEXT)");
+    this.sql.exec("CREATE TABLE IF NOT EXISTS fails (username TEXT PRIMARY KEY, count INTEGER NOT NULL, locked_until INTEGER NOT NULL DEFAULT 0)");
+    try { this.sql.exec("ALTER TABLE access ADD COLUMN creator_until INTEGER NOT NULL DEFAULT 0"); } catch {} // already there
+  }
+  // Seconds until this username can try again (0 = not locked).
+  async lockedFor(username) {
+    const r = this.sql.exec("SELECT locked_until FROM fails WHERE username = ?", username).toArray()[0];
+    return r ? Math.max(0, Math.round((r.locked_until - Date.now()) / 1000)) : 0;
+  }
+  // Records a wrong password; returns tries left before the lock (0 = just locked).
+  async loginFailed(username) {
+    const r = this.sql.exec("SELECT count, locked_until FROM fails WHERE username = ?", username).toArray()[0];
+    let count = r && r.locked_until < Date.now() && r.locked_until > 0 ? 1 : (r ? r.count + 1 : 1);
+    let lockedUntil = 0;
+    if (count >= 10) { lockedUntil = Date.now() + 15 * 60 * 1000; }
+    this.sql.exec("INSERT INTO fails (username, count, locked_until) VALUES (?, ?, ?) ON CONFLICT(username) DO UPDATE SET count = excluded.count, locked_until = excluded.locked_until",
+      username, lockedUntil ? 0 : count, lockedUntil);
+    return lockedUntil ? 0 : 10 - count;
+  }
+  async loginOk(username) {
+    this.sql.exec("DELETE FROM fails WHERE username = ?", username);
   }
   async get(username) {
-    const r = this.sql.exec("SELECT status, last_seen, country FROM access WHERE username = ?", username).toArray()[0];
-    return r ? { status: r.status, lastSeen: r.last_seen || "", country: r.country || "" } : null;
+    const r = this.sql.exec("SELECT status, last_seen, country, creator_until FROM access WHERE username = ?", username).toArray()[0];
+    return r ? { status: r.status, lastSeen: r.last_seen || "", country: r.country || "", creatorUntil: r.creator_until || 0 } : null;
   }
   async set(username, status) {
     this.sql.exec(`INSERT INTO access (username, status, updated) VALUES (?, ?, ?)
       ON CONFLICT(username) DO UPDATE SET status = excluded.status, updated = excluded.updated`,
       username, status, new Date().toISOString());
+  }
+  async setCreator(username, until) {
+    this.sql.exec(`INSERT INTO access (username, creator_until) VALUES (?, ?)
+      ON CONFLICT(username) DO UPDATE SET creator_until = excluded.creator_until`, username, until);
   }
   // "Last on": at most one write every 5 minutes per account.
   async touch(username, country) {
@@ -904,8 +1139,8 @@ export class AccessList extends DurableObject {
   }
   async all() {
     const out = {};
-    for (const r of this.sql.exec("SELECT username, status, last_seen, country FROM access").toArray()) {
-      out[r.username] = { status: r.status, lastSeen: r.last_seen || "", country: r.country || "" };
+    for (const r of this.sql.exec("SELECT username, status, last_seen, country, creator_until FROM access").toArray()) {
+      out[r.username] = { status: r.status, lastSeen: r.last_seen || "", country: r.country || "", creatorUntil: r.creator_until || 0 };
     }
     return out;
   }

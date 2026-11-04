@@ -80,7 +80,9 @@ async function startGame() {
   url = await withSaveTicket(url);
   $("frame").src = url;
   // Count the play for "Most played" (fire and forget).
-  fetch(`/api/plays/${encodeURIComponent(game.id)}`, { method: "POST", keepalive: true }).catch(() => {});
+  fetch(`/api/plays/${encodeURIComponent(game.id)}`, {
+    method: "POST", keepalive: true, headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+  }).catch(() => {}); // also adds it to your Recently Played
   $("frame").classList.remove("hidden");
   $("cover").classList.add("hidden");
   $("frame").focus();
@@ -104,7 +106,7 @@ async function withSaveTicket(url) {
   renderSaveBar();
   if (!user) return url;
   try {
-    const { ticket } = await userApi(`/saves/${save.folder}/ticket`, { method: "POST" });
+    const { ticket } = await userApi(`/saves/${encodeURIComponent(game.id)}/ticket`, { method: "POST", body: JSON.stringify({ folder: save.folder }) });
     const u = new URL(url, location.href);
     u.searchParams.set("ss_save", ticket);
     return u.pathname + u.search + u.hash;
@@ -155,7 +157,7 @@ async function flushSave(useBeacon = false) {
   const data = save.pending;
   save.pending = null;
   try {
-    const res = await fetch(`/api/saves/${save.folder}`, {
+    const res = await fetch(`/api/saves/${encodeURIComponent(game.id)}`, {
       method: "PUT",
       headers: { Authorization: `Bearer ${getToken()}`, "Content-Type": "application/json" },
       body,
@@ -192,7 +194,7 @@ async function resetProgress() {
     clearTimeout(save.timer);
     save.timer = null;
     save.pending = null;
-    await userApi(`/saves/${save.folder}`, { method: "DELETE" });
+    await userApi(`/saves/${encodeURIComponent(game.id)}`, { method: "DELETE" });
     save.last = "";
     save.savedAt = null;
     toast("Progress reset. Restarting the game…");
@@ -211,6 +213,80 @@ function previewSaveBar() {
     save.folder = hostedFolder(game.url);
     renderSaveBar();
   }
+}
+
+/* ---------- 👍 / 👎, ⭐ favourite, 🚩 report ---------- */
+let myVote = 0;
+function renderVotes(v) {
+  myVote = v.mine;
+  $("likeBtn").classList.toggle("on", v.mine === 1);
+  $("dislikeBtn").classList.toggle("on", v.mine === -1);
+  $("likeCount").textContent = formatPlays(v.up);
+  $("dislikeCount").textContent = formatPlays(v.down);
+}
+async function castVote(v) {
+  try {
+    renderVotes(await userApi(`/votes/${encodeURIComponent(game.id)}`, { method: "POST", body: JSON.stringify({ v: myVote === v ? 0 : v }) }));
+  } catch (err) { toast(err.message, true); }
+}
+$("likeBtn").addEventListener("click", () => castVote(1));
+$("dislikeBtn").addEventListener("click", () => castVote(-1));
+
+let isFav = false;
+function renderFav() {
+  $("favBtn").classList.toggle("on", isFav);
+  $("favBtn").innerHTML = isFav ? "⭐ Favourite" : "☆ Favourite";
+  $("favBtn").title = isFav ? "Remove from your favourites" : "Add to your favourites";
+}
+$("favBtn").addEventListener("click", async () => {
+  try {
+    isFav = (await userApi(`/favs/${encodeURIComponent(game.id)}`, { method: "POST", body: JSON.stringify({ on: !isFav }) })).on;
+    renderFav();
+    toast(isFav ? "Added to your favourites ⭐" : "Removed from favourites");
+  } catch (err) { toast(err.message, true); }
+});
+
+$("reportBtn").addEventListener("click", () => {
+  const wrap = document.createElement("div");
+  wrap.className = "ask-backdrop";
+  wrap.innerHTML = `
+    <form class="ask-box report-box">
+      <h3>🚩 Report “${escapeHTML(game.name)}”</h3>
+      <p class="sub">An admin will look at it.</p>
+      <label class="radio"><input type="radio" name="reason" value="broken" checked> It's broken / won't load</label>
+      <label class="radio"><input type="radio" name="reason" value="inappropriate"> It's inappropriate</label>
+      <label class="radio"><input type="radio" name="reason" value="other"> Something else</label>
+      <textarea name="note" maxlength="300" placeholder="Tell us more (optional)"></textarea>
+      <div class="ask-buttons">
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button type="submit" class="btn btn-danger-solid">Send report</button>
+      </div>
+    </form>`;
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.addEventListener("click", (e) => { if (e.target === wrap || e.target.closest("[data-close]")) close(); });
+  wrap.querySelector("form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    f.querySelector("[type=submit]").disabled = true;
+    try {
+      await userApi(`/reports/${encodeURIComponent(game.id)}`, { method: "POST", body: JSON.stringify({ reason: f.reason.value, note: f.note.value }) });
+      close();
+      toast("Thanks! An admin will look at it. 🚩");
+    } catch (err) {
+      toast(err.message, true);
+      f.querySelector("[type=submit]").disabled = false;
+    }
+  });
+});
+
+async function loadSocial() {
+  try {
+    const [votes, lib] = await Promise.all([userApi(`/votes/${encodeURIComponent(game.id)}`), userApi("/library")]);
+    renderVotes(votes);
+    isFav = lib.favs.includes(game.id);
+    renderFav();
+  } catch {}
 }
 
 /* ---------- Fullscreen ---------- */
@@ -275,4 +351,5 @@ $("shareBtn").addEventListener("click", async () => {
   initSidebar(games, current ? `category:${gameCategory(current)}` : "");
   addCreateButton();
   render(games);
+  if (game) loadSocial();
 })();

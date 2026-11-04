@@ -767,3 +767,28 @@ body.gated > *:not(.site-gate):not(.toast) { display: none !important; }
 .ask-buttons { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
 .btn-danger-solid { background: var(--danger); color: #fff; }
 .btn-danger-solid:hover { filter: brightness(1.08); }
+
+/* Play page: votes, favourite, report */
+.vote-group { display: inline-flex; border-radius: 12px; overflow: hidden; }
+.vote-group .vote { border-radius: 0; }
+.vote-group .vote + .vote { border-left: 1px solid var(--border); }
+.vote span { font-weight: 800; }
+.vote.on, #favBtn.on { background: rgba(108, 92, 231, .16); color: var(--accent); }
+#dislikeBtn.on { background: rgba(229, 72, 77, .14); color: var(--danger); }
+.report-box h3 { margin: 0 0 2px; font-size: 20px; }
+.report-box .sub { margin-bottom: 12px; }
+.report-box .radio { display: flex; gap: 10px; align-items: center; padding: 8px 0; font-weight: 700; cursor: pointer; }
+.report-box textarea { width: 100%; min-height: 70px; margin: 8px 0 14px; border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--surface-2); resize: vertical; }
+
+/* Admin: creator access, temp password, reports */
+.creator-select { border: 1px solid var(--border); background: var(--surface-2); border-radius: 8px; padding: 6px 8px; font-weight: 700; font-size: 13px; max-width: 170px; }
+.creator-select.on { border-color: rgba(108, 92, 231, .5); color: var(--accent); }
+.creator-pill { font-size: 12px; font-weight: 800; color: var(--accent); }
+.temp-pw { font: 800 24px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 1px; background: var(--surface-2); border: 2px dashed var(--accent); border-radius: 12px; padding: 14px; text-align: center; margin-bottom: 12px; user-select: all; }
+.ask-box .sub { font-size: 14px; font-weight: 600; margin: 0 0 16px; color: var(--muted); }
+.report-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.report-row:last-child { border-bottom: 0; }
+.report-row.done { opacity: .55; }
+.report-info { flex: 1; min-width: 200px; }
+.report-note { font-size: 14px; color: var(--muted); font-style: italic; margin: 2px 0; }
+#reportsPanel.has-waiting { border-color: var(--danger); box-shadow: 0 0 0 3px rgba(229, 72, 77, .15), var(--shadow); }

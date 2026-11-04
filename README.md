@@ -43,6 +43,21 @@ How a player gets a paid game:
 - **👀 Login attempts** shows everyone who logged in or signed up, and failed tries, for the last 30 days: when, username, what happened, rough location and device.
 - The server enforces the lock: the game list (`/api/games`), games, saves and Create tools refuse anyone who isn't allowed, and `/data/games.json` isn't public.
 
+## More admin tools
+- **Creator accounts:** only creators (and admins) can add games or upload new versions. In **Who can get on**, the **Creator** column sets each account to *forever*, *1 / 7 / 30 / 90 days* (it switches off by itself), or *not a creator*. People keep the games they've already added.
+- **🔑 Reset password** makes a temporary password like `storm-comet-933`. They must choose their own the next time they log in, and the reset logs them out everywhere. Everyone can also use **Change password** in their account menu.
+- **Login lockout:** 10 wrong passwords in a row lock that username for 15 minutes. A password reset clears it.
+- **🚩 Reports:** games players reported as broken or inappropriate. Check them, then mark them done.
+
+## For players
+- **👍 / 👎** on every game, and a **Top Rated** section on the home page.
+- **⭐ Favourite** button, plus **Recently Played** and **Your Favourites** at the top of the home page, saved to their account.
+- **🚩 Report** button for broken or inappropriate games.
+
+## Updating games
+- **Link games** update by themselves. StudySmartly shows the creator's own site, so changes there show here straight away.
+- **Uploaded games:** in **My games → Edit**, creators upload a new version. Plays, likes and everyone's saved progress stay, because saves belong to the game, not its files.
+
 ## Admin accounts
 Anyone can make an account on `login.html`. In the admin panel, click **Make admin** next to an account.
 

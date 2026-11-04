@@ -155,6 +155,7 @@ function cardHTML(g, user, opts = {}) {
         <div class="card-title">${escapeHTML(g.name)}</div>
         <div class="card-creator">by ${escapeHTML(g.creator || "Unknown")}</div>
         ${opts.plays ? `<div class="card-plays">▶ ${formatPlays(opts.plays)} play${opts.plays === 1 ? "" : "s"}</div>` : ""}
+        ${opts.likes ? `<div class="card-plays">👍 ${formatPlays(opts.likes)}</div>` : ""}
       </div>
       ${opts.rank ? `<span class="rank rank-${opts.rank}">#${opts.rank}</span>` : ""}
     </a>`;
@@ -205,6 +206,7 @@ function loginURL(mode = "login") {
 
 // Header account button. Call once per page.
 function initAccount(user) {
+  currentUserForMenus = user;
   const slot = document.getElementById("accountSlot");
   if (!slot) return;
   if (!user) {
@@ -222,6 +224,8 @@ function initAccount(user) {
           ${user.admin ? `<span class="admin-tag">ADMIN</span>` : ""}</div>
         <div class="dd-sub">${user.admin ? "You can play every paid game" : `${user.unlocked.length} paid game${user.unlocked.length === 1 ? "" : "s"} unlocked`}</div>
         ${user.admin ? `<a class="btn btn-primary btn-small" href="admin.html" style="width:100%;margin-bottom:8px">🛡️ Admin panel</a>` : ""}
+        ${user.creator && !user.admin ? `<div class="dd-sub">🎨 Creator${user.creatorUntil > 0 ? ` until ${new Date(user.creatorUntil).toLocaleDateString()}` : ""}</div>` : ""}
+        <a class="btn btn-ghost btn-small" href="login.html?mode=change" style="width:100%;margin-bottom:8px">🔑 Change password</a>
         <button class="btn btn-ghost btn-small" id="logoutUserBtn" style="width:100%">Log out</button>
       </div>
     </div>`;
@@ -232,8 +236,12 @@ function initAccount(user) {
 }
 
 // Round "+" button in the bottom-right corner that opens the Create page.
+let currentUserForMenus = null; // set by initAccount; decides creator-only links
+function canCreate(user) {
+  return !!(user && (user.admin || user.creator));
+}
 function addCreateButton() {
-  if (document.querySelector(".fab")) return;
+  if (document.querySelector(".fab") || !canCreate(currentUserForMenus)) return;
   document.body.insertAdjacentHTML("beforeend", `
     <a class="fab" href="create.html" aria-label="Add your game">
       <span class="fab-plus">${ICONS.plus}</span><span class="fab-label">Add your game</span>
@@ -291,7 +299,7 @@ function initSidebar(games, active = "") {
           : `<p class="side-empty">No games yet</p>`}
         <div class="side-heading">Community</div>
         ${link("creators.html", "👥", "Creators", "creators")}
-        ${link("create.html", "＋", "Add your game", "create")}
+        ${canCreate(currentUserForMenus) ? link("create.html", "＋", "Add your game", "create") : ""}
       </nav>
     </aside>`);
   document.body.classList.add("has-sidebar");
@@ -316,6 +324,11 @@ function initSidebar(games, active = "") {
    siteGate(user) first; if the visitor isn't approved it shows this screen
    instead of the page and returns false. (The server enforces it too.) */
 function siteGate(user) {
+  // After an admin reset, they must choose their own password first.
+  if (user && user.mustChange && !location.pathname.startsWith("/login")) {
+    location.href = `login.html?mode=change&reset=1&next=${encodeURIComponent(location.pathname.replace(/^\//, "") + location.search)}`;
+    return false;
+  }
   const status = user ? (user.admin ? "approved" : user.status || "approved") : "loggedout";
   if (status === "approved") return true;
 

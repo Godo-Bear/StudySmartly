@@ -8,7 +8,7 @@ let mode = params.get("mode") === "signup" ? "signup" : "login";
 // Only allow going back to a page on this site.
 function nextPage() {
   const next = params.get("next") || "";
-  return /^[\w./?=&%-]*$/.test(next) && !next.startsWith("//") && !next.includes("login.html") ? next || "./" : "./";
+  return /^[\w./?=&%-]*$/.test(next) && !next.startsWith("//") && !next.includes("login") ? next || "./" : "./";
 }
 
 function setMode(m) {
@@ -74,11 +74,16 @@ $("authForm").addEventListener("submit", async (e) => {
   btn.disabled = true;
   btn.textContent = mode === "signup" ? "Creating account…" : "Logging in…";
   try {
-    const { token } = await userApi(`/auth/${mode}`, {
+    const { token, mustChange } = await userApi(`/auth/${mode}`, {
       method: "POST",
       body: JSON.stringify({ username: $("authUser").value.trim(), password: $("authPass").value }),
     });
     setToken(token);
+    // After an admin reset, they pick their own password before going on.
+    if (mustChange) {
+      location.href = `login.html?mode=change&reset=1&next=${encodeURIComponent(nextPage())}`;
+      return;
+    }
     location.href = nextPage();
   } catch (err) {
     showError(err.status === 404 ? "Accounts only work on the live site." : err.message);
@@ -89,10 +94,47 @@ $("authForm").addEventListener("submit", async (e) => {
 
 $("logoutBtn").addEventListener("click", logOut);
 
+/* ---------- Change password ---------- */
+function showChange(me) {
+  $("authView").classList.add("hidden");
+  $("signedIn").classList.add("hidden");
+  $("changeView").classList.remove("hidden");
+  if (params.get("reset")) {
+    $("changeSub").innerHTML = `An admin reset the password for <b>${escapeHTML(me.username)}</b>. Choose your own new password to carry on.`;
+    $("curPassLabel").textContent = "Temporary password (the one the admin gave you)";
+  } else {
+    $("changeSub").innerHTML = `Signed in as <b>${escapeHTML(me.username)}</b>.`;
+  }
+  $("curPass").focus();
+}
+$("changeForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const err = (m) => { $("changeError").textContent = m; $("changeError").classList.toggle("hidden", !m); };
+  const cur = $("curPass").value, p1 = $("newPass").value, p2 = $("newPass2").value;
+  if (!cur) return err("Type your current password.");
+  if (p1.length < 6) return err("New passwords need at least 6 characters.");
+  if (p1 !== p2) return err("The two new passwords don't match.");
+  err("");
+  $("changeSubmit").disabled = true;
+  try {
+    const { token } = await userApi("/auth/password", { method: "POST", body: JSON.stringify({ current: cur, password: p1 }) });
+    setToken(token);
+    toast("Password changed ✅");
+    setTimeout(() => (location.href = nextPage()), 700);
+  } catch (e2) {
+    err(e2.message);
+    $("changeSubmit").disabled = false;
+  }
+});
+
 (async function init() {
   fillIcons();
   initTheme();
   const me = await loadMe();
+  if (params.get("mode") === "change") {
+    if (me) return showChange(me);
+    mode = "login"; // need to log in first
+  }
   if (me) {
     $("authView").classList.add("hidden");
     $("signedIn").classList.remove("hidden");

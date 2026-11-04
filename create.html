@@ -47,7 +47,12 @@
     </section>
 
     <div class="create-layout hidden" id="createView">
-      <section class="panel">
+      <section class="panel" id="notCreator" style="display:none">
+        <h2>🎨 Creator accounts only</h2>
+        <p class="sub">Only creator accounts can add games to StudySmartly. Ask an admin to make your account a creator account.</p>
+        <p class="muted-note">You can still edit, delete and unlock the games you've already added, under <b>My games</b>.</p>
+      </section>
+      <section class="panel" id="formPanel">
         <h2 id="formTitle">Add your game</h2>
         <p class="sub" id="formSub">It goes live for everyone about a minute after you publish.</p>
 
@@ -64,6 +69,7 @@
             <div class="field">
               <label for="fUrl">Game link <span class="req">*</span></label>
               <input id="fUrl" type="url" inputmode="url" placeholder="https://my-game.pages.dev">
+              <span class="hint">🔄 Games added by link update by themselves: when you change your game's site, it changes here too.</span>
             </div>
           </div>
 
@@ -88,7 +94,7 @@
             </div>
           </div>
 
-          <div id="filesLocked" class="note-box hidden">📦 This game's files are hosted on StudySmartly. To change the files, delete the game and add it again.</div>
+          <div id="filesLocked" class="note-box hidden">📦 This game's files are hosted on StudySmartly. Fixed a bug or made it better? <b>Upload a new version</b> below. Its plays, likes and everyone's saved progress stay.</div>
 
           <div class="field">
             <label for="fName">Game name <span class="req">*</span></label>

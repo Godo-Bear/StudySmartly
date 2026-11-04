@@ -213,6 +213,7 @@ $("uploadBox").addEventListener("drop", (e) => pickFile(e.dataTransfer.files[0])
 async function loadUsers() {
   $("userRows").innerHTML = `<p class="muted-note">Loading accounts…</p>`;
   loadLogins();
+  loadReports();
   try {
     users = (await api("/users")).users;
     renderUsers();
@@ -235,6 +236,109 @@ function flag(cc) {
   return /^[A-Z]{2}$/.test(cc || "") ? String.fromCodePoint(...[...cc].map((c) => 127397 + c.charCodeAt(0))) + " " + cc : "";
 }
 
+// Creator access: Not a creator / forever / for a set time
+function creatorCell(u) {
+  if (u.admin) return `<span class="creator-pill on">🎨 Always (admin)</span>`;
+  const left = u.creatorUntil > 0 ? u.creatorUntil - Date.now() : 0;
+  const now = u.creatorUntil === -1 ? "Forever" : left > 0 ? `Until ${new Date(u.creatorUntil).toLocaleDateString()}` : "No";
+  return `<select class="creator-select ${u.creator ? "on" : ""}" data-creator="${escapeHTML(u.username)}" aria-label="Creator access for ${escapeHTML(u.username)}">
+      <option value="" selected disabled>${u.creator ? "🎨 " : ""}${now}</option>
+      <option value="-1">🎨 Creator forever</option>
+      <option value="1">🎨 For 1 day</option>
+      <option value="7">🎨 For 7 days</option>
+      <option value="30">🎨 For 30 days</option>
+      <option value="90">🎨 For 90 days</option>
+      <option value="0">✖ Not a creator</option>
+    </select>`;
+}
+async function setCreator(username, days) {
+  try {
+    const { user } = await api(`/users/${encodeURIComponent(username)}/creator`, { method: "POST", body: JSON.stringify({ days: Number(days) }) });
+    users = users.map((u) => (u.username === user.username ? { ...u, creator: user.creator, creatorUntil: user.creatorUntil } : u));
+    renderUsers();
+    toast(Number(days) === 0 ? `${username} can't add games anymore` : Number(days) === -1 ? `${username} is a creator 🎨` : `${username} is a creator for ${days} day${days === "1" ? "" : "s"} 🎨`);
+  } catch (err) {
+    if (!handleAuthError(err)) toast(err.message, true);
+    renderUsers();
+  }
+}
+$("pendingRows").addEventListener("change", (e) => {
+  const sel = e.target.closest("[data-creator]");
+  if (sel && sel.value !== "") setCreator(sel.dataset.creator, sel.value);
+});
+
+// Reset a password: show the temporary one to pass on.
+async function resetPassword(username) {
+  if (!(await askConfirm(`Make a new temporary password for ${username}? Their old password stops working and they're logged out everywhere.`, { yes: "Reset password" }))) return;
+  try {
+    const { temp } = await api(`/users/${encodeURIComponent(username)}/password`, { method: "POST" });
+    const wrap = document.createElement("div");
+    wrap.className = "ask-backdrop";
+    wrap.innerHTML = `
+      <div class="ask-box">
+        <p>New temporary password for <b>${escapeHTML(username)}</b>:</p>
+        <div class="temp-pw" id="tempPw">${escapeHTML(temp)}</div>
+        <p class="sub">Give it to them. When they log in, they'll be asked to choose their own password.</p>
+        <div class="ask-buttons">
+          <button class="btn btn-ghost" id="copyPw">Copy</button>
+          <button class="btn btn-primary" id="donePw">Done</button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+    wrap.querySelector("#copyPw").addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(temp); toast("Copied"); } catch { toast("Select it and copy it by hand", true); }
+    });
+    wrap.querySelector("#donePw").addEventListener("click", () => wrap.remove());
+  } catch (err) {
+    if (!handleAuthError(err)) toast(err.message, true);
+  }
+}
+
+/* ---------- 🚩 Reports ---------- */
+const REASON = { broken: "💥 Broken / won't load", inappropriate: "⚠️ Inappropriate", other: "💬 Something else" };
+let reports = [];
+async function loadReports() {
+  try {
+    reports = (await api("/reports")).reports;
+    renderReports();
+  } catch (err) {
+    if (!handleAuthError(err)) $("reportRows").innerHTML = `<p class="muted-note">Couldn't load reports: ${escapeHTML(err.message)}</p>`;
+  }
+}
+function renderReports() {
+  const open = reports.filter((r) => !r.resolvedAt);
+  $("reportCount").textContent = open.length;
+  $("reportCount").classList.toggle("zero", !open.length);
+  $("reportsPanel").classList.toggle("has-waiting", open.length > 0);
+  const nameOf = (id) => (games.find((g) => g.id === id) || {}).name || "(deleted game)";
+  $("reportRows").innerHTML = reports.length
+    ? reports.slice(0, 50).map((r) => `
+      <div class="report-row ${r.resolvedAt ? "done" : ""}">
+        <div class="report-info">
+          <div><b>${escapeHTML(nameOf(r.game))}</b> · ${REASON[r.reason] || escapeHTML(r.reason)}</div>
+          ${r.note ? `<div class="report-note">“${escapeHTML(r.note)}”</div>` : ""}
+          <div class="udate">by ${escapeHTML(r.user)} · ${ago(r.at)}${r.resolvedAt ? ` · ✅ done by ${escapeHTML(r.resolvedBy)}` : ""}</div>
+        </div>
+        <a class="btn btn-ghost btn-small" href="play.html?id=${encodeURIComponent(r.game)}" target="_blank" rel="noopener">▶ Check it</a>
+        ${r.resolvedAt ? "" : `<button class="btn btn-primary btn-small" data-resolve="${r.id}">✅ Done</button>`}
+      </div>`).join("")
+    : `<p class="muted-note">No reports. 🎉</p>`;
+}
+$("refreshReportsBtn").addEventListener("click", loadReports);
+$("reportRows").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-resolve]");
+  if (!b) return;
+  b.disabled = true;
+  try {
+    await api(`/reports/${b.dataset.resolve}/resolve`, { method: "POST" });
+    loadReports();
+    toast("Report marked done ✅");
+  } catch (err) {
+    if (!handleAuthError(err)) toast(err.message, true);
+    b.disabled = false;
+  }
+});
+
 // "Who can get on" table: Username | Allowed TRUE/FALSE. Waiting accounts first.
 function renderPending() {
   const order = { pending: 0, blocked: 1, approved: 2 };
@@ -253,10 +357,11 @@ function renderPending() {
             : `<button class="bool ${allowed ? "true" : "false"}" data-set-status="${allowed ? "pending" : "approved"}" data-user="${escapeHTML(u.username)}"
                  title="${allowed ? "Click to take access away" : "Click to let them on"}">${allowed ? "TRUE" : "FALSE"}</button>`}</td>
           <td>${ago(u.createdAt)}${u.country ? ` · ${flag(u.country)}` : ""}</td>
+          <td>${creatorCell(u)}</td>
           <td>${ago(u.lastSeen)}</td>
         </tr>`;
       }).join("")
-    : `<tr><td colspan="4" class="muted-note">No accounts yet.</td></tr>`;
+    : `<tr><td colspan="5" class="muted-note">No accounts yet.</td></tr>`;
 }
 
 async function setStatus(username, status) {
@@ -275,6 +380,7 @@ async function setStatus(username, status) {
 const RESULT_LABEL = {
   ok: ["✅", "Logged in", "ok"], signup: ["🆕", "Signed up (waiting)", "info"], pending: ["⏳", "Logged in, still waiting", "warn"],
   blocked: ["⛔", "Blocked account tried", "bad"], "wrong-password": ["❌", "Wrong password", "bad"], "no-account": ["❓", "No such account", "bad"],
+  locked: ["🔒", "Locked (too many wrong passwords)", "bad"],
 };
 let logins = [];
 async function loadLogins() {
@@ -338,6 +444,7 @@ function renderUsers() {
             <span class="status-pill ${u.status}">${STATUS_LABEL[u.status] || u.status}</span></div>
           ${u.admin ? "" : `<button class="bool ${u.status === "approved" ? "true" : "false"}" style="margin-left:auto" data-set-status="${u.status === "approved" ? "pending" : "approved"}" data-user="${escapeHTML(u.username)}" title="Allowed to get on?">${u.status === "approved" ? "TRUE" : "FALSE"}</button>`}
           <button class="btn btn-ghost btn-small" style="${u.admin ? "margin-left:auto" : ""}" data-admin="${escapeHTML(u.username)}" data-make="${u.admin ? "0" : "1"}">${u.admin ? "Remove admin" : "Make admin"}</button>
+          <button class="btn btn-ghost btn-small" data-reset-pw="${escapeHTML(u.username)}" title="Make a temporary password for them">🔑 Reset password</button>
           <button class="btn btn-danger" style="margin-left:0" data-del-user="${escapeHTML(u.username)}">Delete</button>
         </div>
         <div class="owned-list">
@@ -445,6 +552,8 @@ $("userRows").addEventListener("click", async (e) => {
   }
   const statusBtn = e.target.closest("[data-set-status]");
   if (statusBtn) return setStatus(statusBtn.dataset.user, statusBtn.dataset.setStatus);
+  const resetBtn = e.target.closest("[data-reset-pw]");
+  if (resetBtn) return resetPassword(resetBtn.dataset.resetPw);
   const delBtn = e.target.closest("[data-del-user]");
   if (delBtn) {
     const name = delBtn.dataset.delUser;

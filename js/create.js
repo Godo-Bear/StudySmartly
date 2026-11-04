@@ -264,8 +264,13 @@ $("gameForm").addEventListener("submit", async (e) => {
     if (editing) {
       btn.textContent = "Saving…";
       if (!isUploaded(editing)) body.url = $("fUrl").value.trim();
+      else if (gameFiles) {
+        btn.textContent = "Uploading new version…";
+        body.uploadId = await uploadFiles();
+        body.entry = $("fEntry").value;
+      }
       await userApi(`/my/games/${encodeURIComponent(editing.id)}`, { method: "PUT", body: JSON.stringify(body) });
-      toast(`Saved “${body.name}”`);
+      toast(body.uploadId ? `New version of “${body.name}” is up! 🎉 Live in about a minute.` : `Saved “${body.name}”`);
       resetForm();
       loadMyGames();
       return;
@@ -332,6 +337,7 @@ function resetForm() {
   $("cancelEdit").classList.add("hidden");
   showError("");
   setImage(null);
+  if (me && !canCreate(me)) { $("formPanel").style.display = "none"; $("notCreator").style.display = ""; }
 }
 
 function startEdit(id) {
@@ -339,11 +345,16 @@ function startEdit(id) {
   if (!g) return;
   resetForm();
   editing = g;
+  $("formPanel").style.display = "";
+  $("notCreator").style.display = "none";
   $("sourceTabs").classList.add("hidden");
   if (isUploaded(g)) {
     $("linkSource").classList.add("hidden");
-    $("uploadSource").classList.add("hidden");
     $("filesLocked").classList.remove("hidden");
+    // Creators can upload a new version of the files
+    $("uploadSource").classList.toggle("hidden", !canCreate(me));
+    $("filesLabel").textContent = "Upload a new version (optional)";
+    $("filesHint").textContent = "A .zip of the updated game folder, or the updated .html file";
   } else {
     setSource("link");
     $("fUrl").value = g.url || "";
@@ -362,7 +373,10 @@ function startEdit(id) {
   setImage(null);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
-$("cancelEdit").addEventListener("click", resetForm);
+$("cancelEdit").addEventListener("click", () => {
+  resetForm();
+  if (!canCreate(me)) { $("formPanel").style.display = "none"; $("notCreator").style.display = ""; }
+});
 
 async function loadMyGames() {
   try {
@@ -513,5 +527,9 @@ $("myGames").addEventListener("click", async (e) => {
   $("categoryList").innerHTML = cats.map((c) => `<option value="${escapeHTML(c)}">`).join("");
   $("createView").classList.remove("hidden");
   resetForm();
+  if (!canCreate(me)) {
+    $("formPanel").style.display = "none";
+    $("notCreator").style.display = "";
+  }
   loadMyGames();
 })();

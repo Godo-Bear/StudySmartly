@@ -55,6 +55,23 @@
         </div>
       </div>
 
+      <!-- Change password (also after an admin reset) -->
+      <div id="changeView" class="hidden">
+        <h2>🔑 Change password</h2>
+        <p class="sub" id="changeSub">Choose a new password for your account.</p>
+        <form id="changeForm" novalidate>
+          <div class="field"><label for="curPass" id="curPassLabel">Current password</label>
+            <input id="curPass" type="password" autocomplete="current-password" maxlength="200"></div>
+          <div class="field"><label for="newPass">New password</label>
+            <input id="newPass" type="password" autocomplete="new-password" maxlength="200">
+            <span class="hint">At least 6 characters.</span></div>
+          <div class="field"><label for="newPass2">Type it again</label>
+            <input id="newPass2" type="password" autocomplete="new-password" maxlength="200"></div>
+          <p class="form-error hidden" id="changeError" role="alert"></p>
+          <button class="btn btn-primary" style="width:100%" id="changeSubmit" type="submit">Save new password</button>
+        </form>
+      </div>
+
       <!-- Log in / sign up -->
       <div id="authView">
         <div class="auth-tabs" role="tablist">
