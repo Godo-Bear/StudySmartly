@@ -29,5 +29,15 @@
     "thumbnail": "images/445ab0c9-7e49-4f60-b896-3b8909940a4d-mw0bcsez.webp",
     "addedAt": "2026-11-03T06:35:19.245Z",
     "updatedAt": "2026-11-03T06:36:29.499Z"
+  },
+  {
+    "id": "99bc7bbe-3469-417c-b219-5bc262655fc3",
+    "name": "Neo",
+    "creator": "Lawrence Licos",
+    "url": "https://neo.jn-studios.workers.dev/",
+    "category": "Multiplayer",
+    "description": "",
+    "thumbnail": "images/99bc7bbe-3469-417c-b219-5bc262655fc3-mw2q3dlq.webp",
+    "addedAt": "2026-11-04T23:03:26.197Z"
   }
 ]
