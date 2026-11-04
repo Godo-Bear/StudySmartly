@@ -596,7 +596,7 @@ async function deleteGameFiles(env, id) {
 /* ---------- Games: shared by the admin panel and creators ---------- */
 async function createGame(env, id, data, image) {
   if (!image) throw httpError(400, "Please upload a thumbnail picture.");
-  data.thumbnail = await saveImage(env, id, image, data.name);
+  data.thumbnail = imagePath(id, image);
   if (data.paid) {
     await env.DB.put(`url:${id}`, data.url); // keep the link private
     data.url = "";
@@ -605,44 +605,47 @@ async function createGame(env, id, data, image) {
   const games = await mutate(env, (list) => {
     if (list.some((g) => g.id === id)) throw httpError(409, "That game was already added.");
     return [...list, game];
-  }, `Add game: ${game.name} by ${game.creator}`);
+  }, `Add game: ${game.name} by ${game.creator}`, { [data.thumbnail]: image.data });
   return { games, game };
 }
 
 async function updateGame(env, id, data, image) {
-  if (image) data.thumbnail = await saveImage(env, id, image, data.name);
+  const files = {};
+  if (image) {
+    data.thumbnail = imagePath(id, image);
+    files[data.thumbnail] = image.data;
+  }
   if (data.paid) {
     await env.DB.put(`url:${id}`, data.url);
     data.url = "";
   }
-  let oldThumb = "";
-  const games = await mutate(env, (list) => {
+  const games = await mutate(env, (list, extra) => {
     const g = list.find((x) => String(x.id) === id);
     if (!g) throw httpError(404, "That game no longer exists.");
-    oldThumb = g.thumbnail || "";
+    // the old picture is removed in the same save
+    if (image && isOurImage(g.thumbnail) && g.thumbnail !== data.thumbnail) extra[g.thumbnail] = null;
     Object.assign(g, data, { updatedAt: new Date().toISOString() });
     if (!data.paid) delete g.paid;
     if (!data.price) delete g.price;
     return list;
-  }, `Update game: ${data.name}`);
+  }, `Update game: ${data.name}`, files);
   if (!data.paid) await env.DB.delete(`url:${id}`); // now free: link is public again
-  if (image && oldThumb !== data.thumbnail) await deleteImage(env, oldThumb);
   return games;
 }
 
 async function removeGame(env, id) {
   let removed = "", thumb = "", link = "";
-  const games = await mutate(env, (list) => {
+  const games = await mutate(env, (list, extra) => {
     const g = list.find((x) => String(x.id) === id);
     if (!g) throw httpError(404, "That game no longer exists.");
     removed = g.name;
     thumb = g.thumbnail || "";
     link = g.url || "";
+    if (isOurImage(thumb)) extra[thumb] = null; // picture goes in the same save
     return list.filter((x) => x !== g);
   }, () => `Remove game: ${removed}`);
   link = (await env.DB.get(`url:${id}`)) || link;
   await env.DB.delete(`url:${id}`);
-  await deleteImage(env, thumb);
   const folder = link.match(/^\/games\/([\w-]+)\//);
   if (folder) await deleteGameFiles(env, folder[1]);
   return games;
@@ -995,32 +998,12 @@ function checkImage(image) {
   return { data, ext };
 }
 
-// Commit the picture to images/ on main. Each upload gets a new name so the
-// browser never shows an old cached picture.
-async function saveImage(env, id, image, name) {
-  const path = `${IMAGE_DIR}/${id}-${Date.now().toString(36)}.${image.ext}`;
-  await gh(env, `/contents/${path}`, {
-    method: "PUT",
-    body: JSON.stringify({
-      message: `Upload thumbnail: ${name}`,
-      content: image.data,
-      branch: env.GITHUB_BRANCH || "main",
-    }),
-  });
-  return path;
+// Each upload gets a new name so the browser never shows an old cached picture.
+function imagePath(id, image) {
+  return `${IMAGE_DIR}/${id}-${Date.now().toString(36)}.${image.ext}`;
 }
-
-// Best effort: remove an old uploaded picture we no longer use.
-async function deleteImage(env, path) {
-  if (!path || !path.startsWith(`${IMAGE_DIR}/`) || path.includes("..")) return;
-  try {
-    const branch = env.GITHUB_BRANCH || "main";
-    const file = await gh(env, `/contents/${path}?ref=${encodeURIComponent(branch)}`);
-    await gh(env, `/contents/${path}`, {
-      method: "DELETE",
-      body: JSON.stringify({ message: `Remove old thumbnail ${path}`, sha: file.sha, branch }),
-    });
-  } catch {}
+function isOurImage(path) {
+  return !!path && path.startsWith(`${IMAGE_DIR}/`) && !path.includes("..");
 }
 
 /* ---------- GitHub storage ---------- */
@@ -1041,41 +1024,61 @@ async function gh(env, path, opts = {}) {
     let msg = `GitHub error ${res.status}`;
     try { msg = `GitHub: ${(await res.json()).message}`; } catch {}
     if (res.status === 401) msg = "GitHub rejected the GITHUB_TOKEN secret. Check it in Cloudflare.";
-    throw httpError(res.status === 409 ? 409 : 502, msg);
+    const e = httpError(res.status === 409 ? 409 : res.status === 404 ? 404 : 502, msg);
+    e.github = res.status;
+    throw e;
   }
   return res.json();
 }
 
-async function readGames(env) {
-  const branch = env.GITHUB_BRANCH || "main";
+async function readGames(env, ref) {
+  const at = ref || env.GITHUB_BRANCH || "main";
   try {
-    const file = await gh(env, `/contents/${FILE_PATH}?ref=${encodeURIComponent(branch)}`);
+    const file = await gh(env, `/contents/${FILE_PATH}?ref=${encodeURIComponent(at)}`);
     const parsed = JSON.parse(b64decode(file.content));
     return { games: Array.isArray(parsed) ? parsed : parsed.games || [], sha: file.sha };
   } catch (err) {
-    if (/404|Not Found/.test(err.message)) return { games: [], sha: null };
+    if (err.github === 404) return { games: [], sha: null };
     throw err;
   }
 }
 
-// Read latest -> apply change -> commit. Retry if someone saved at the same time.
-async function mutate(env, change, message) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { games, sha } = await readGames(env);
-    const next = change(games);
+// Read latest -> apply change -> save games.json AND any pictures as ONE commit.
+// (Two quick commits made Cloudflare sometimes build only the first one, so a
+// new game didn't show up.) `files` maps path -> base64 content, or null to delete;
+// `change(list, extra)` can add more entries to `extra`.
+// If someone else saved at the same moment, start again from their version.
+async function mutate(env, change, message, files = {}) {
+  const branch = env.GITHUB_BRANCH || "main";
+  const blobs = {}; // upload each picture only once, even if we retry
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const head = (await gh(env, `/git/ref/heads/${encodeURIComponent(branch)}`)).object.sha;
+    const { games } = await readGames(env, head);
+    const extra = { ...files };
+    const next = change(games, extra);
+    const tree = [{ path: FILE_PATH, mode: "100644", type: "blob", content: JSON.stringify(next, null, 2) + "\n" }];
+    for (const [path, data] of Object.entries(extra)) {
+      if (data === null) {
+        // only delete files that are really there, or GitHub refuses the whole save
+        const there = await gh(env, `/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${head}`).then(() => true, () => false);
+        if (there) tree.push({ path, mode: "100644", type: "blob", sha: null });
+      } else {
+        blobs[path] ??= (await gh(env, "/git/blobs", { method: "POST", body: JSON.stringify({ content: data, encoding: "base64" }) })).sha;
+        tree.push({ path, mode: "100644", type: "blob", sha: blobs[path] });
+      }
+    }
+    const base = (await gh(env, `/git/commits/${head}`)).tree.sha;
+    const newTree = (await gh(env, "/git/trees", { method: "POST", body: JSON.stringify({ base_tree: base, tree }) })).sha;
+    const commit = (await gh(env, "/git/commits", {
+      method: "POST",
+      body: JSON.stringify({ message: typeof message === "function" ? message() : message, tree: newTree, parents: [head] }),
+    })).sha;
     try {
-      await gh(env, `/contents/${FILE_PATH}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          message: typeof message === "function" ? message() : message,
-          content: b64encode(JSON.stringify(next, null, 2) + "\n"),
-          branch: env.GITHUB_BRANCH || "main",
-          ...(sha ? { sha } : {}),
-        }),
-      });
+      await gh(env, `/git/refs/heads/${encodeURIComponent(branch)}`, { method: "PATCH", body: JSON.stringify({ sha: commit, force: false }) });
       return next;
     } catch (err) {
-      if (err.status !== 409 || attempt === 2) throw err;
+      // 422 "not a fast forward": main moved since we read it
+      if (attempt === 3 || ![409, 422].includes(err.github)) throw err;
     }
   }
 }
