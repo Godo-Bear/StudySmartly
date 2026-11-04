@@ -212,6 +212,7 @@ $("uploadBox").addEventListener("drop", (e) => pickFile(e.dataTransfer.files[0])
 /* ---------- Player accounts ---------- */
 async function loadUsers() {
   $("userRows").innerHTML = `<p class="muted-note">Loading accounts…</p>`;
+  loadLogins();
   try {
     users = (await api("/users")).users;
     renderUsers();
@@ -220,8 +221,95 @@ async function loadUsers() {
   }
 }
 
+/* ---------- Approving accounts + login log ---------- */
+const STATUS_LABEL = { approved: "✅ Allowed", pending: "⏳ Not allowed yet", blocked: "⛔ Blocked" };
+function ago(iso) {
+  if (!iso) return "never";
+  const s = Math.round((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} days ago`;
+}
+function flag(cc) {
+  return /^[A-Z]{2}$/.test(cc || "") ? String.fromCodePoint(...[...cc].map((c) => 127397 + c.charCodeAt(0))) + " " + cc : "";
+}
+
+// "Who can get on" table: Username | Allowed TRUE/FALSE. Waiting accounts first.
+function renderPending() {
+  const order = { pending: 0, blocked: 1, approved: 2 };
+  const list = [...users].sort((a, b) => (a.admin - b.admin) || (order[a.status] - order[b.status]) || new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+  const waiting = users.filter((u) => !u.admin && u.status !== "approved").length;
+  $("pendingCount").textContent = waiting;
+  $("pendingCount").classList.toggle("zero", !waiting);
+  $("approvePanel").classList.toggle("has-waiting", waiting > 0);
+  $("pendingRows").innerHTML = list.length
+    ? list.map((u) => {
+        const allowed = u.admin || u.status === "approved";
+        return `<tr>
+          <td class="name">${escapeHTML(u.username)}${u.admin ? ` <span class="admin-tag">ADMIN</span>` : ""}</td>
+          <td>${u.admin
+            ? `<span class="bool true locked" title="Admins are always allowed">TRUE</span>`
+            : `<button class="bool ${allowed ? "true" : "false"}" data-set-status="${allowed ? "pending" : "approved"}" data-user="${escapeHTML(u.username)}"
+                 title="${allowed ? "Click to take access away" : "Click to let them on"}">${allowed ? "TRUE" : "FALSE"}</button>`}</td>
+          <td>${ago(u.createdAt)}${u.country ? ` · ${flag(u.country)}` : ""}</td>
+          <td>${ago(u.lastSeen)}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="4" class="muted-note">No accounts yet.</td></tr>`;
+}
+
+async function setStatus(username, status) {
+  if (status !== "approved" && !confirm(`Take ${username}'s access away? They won't be able to get on StudySmartly until you set them back to TRUE.`)) return;
+  try {
+    const { user } = await api(`/users/${encodeURIComponent(username)}/status`, { method: "POST", body: JSON.stringify({ status }) });
+    users = users.map((u) => (u.username === user.username ? user : u));
+    renderUsers();
+    toast(status === "approved" ? `${username}: TRUE. They can get on now ✅` : `${username}: FALSE. Access taken away`);
+  } catch (err) {
+    if (!handleAuthError(err)) toast(err.message, true);
+  }
+}
+
+const RESULT_LABEL = {
+  ok: ["✅", "Logged in", "ok"], signup: ["🆕", "Signed up (waiting)", "info"], pending: ["⏳", "Logged in, still waiting", "warn"],
+  blocked: ["⛔", "Blocked account tried", "bad"], "wrong-password": ["❌", "Wrong password", "bad"], "no-account": ["❓", "No such account", "bad"],
+};
+let logins = [];
+async function loadLogins() {
+  try {
+    logins = (await api("/logins")).logins;
+    renderLogins();
+  } catch (err) {
+    if (!handleAuthError(err)) $("loginRows").innerHTML = `<tr><td colspan="5" class="muted-note">Couldn't load: ${escapeHTML(err.message)}</td></tr>`;
+  }
+}
+function renderLogins() {
+  const onlyProblems = $("loginFilter").value === "problems";
+  const list = logins.filter((l) => !onlyProblems || l.result !== "ok");
+  $("loginRows").innerHTML = list.length
+    ? list.map((l) => {
+        const [icon, label, kind] = RESULT_LABEL[l.result] || ["•", l.result, "info"];
+        return `<tr>
+          <td title="${escapeHTML(new Date(l.at).toLocaleString())}">${ago(l.at)}</td>
+          <td class="name">${escapeHTML(l.username || "—")}</td>
+          <td><span class="log-pill ${kind}">${icon} ${escapeHTML(label)}</span></td>
+          <td>${escapeHTML([l.city, flag(l.country)].filter(Boolean).join(", ") || "—")}</td>
+          <td>${escapeHTML(l.device || "—")}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="5" class="muted-note">No login attempts yet.</td></tr>`;
+}
+$("loginFilter").addEventListener("change", renderLogins);
+$("refreshLoginsBtn").addEventListener("click", loadLogins);
+$("pendingRows").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-set-status]");
+  if (b) setStatus(b.dataset.user, b.dataset.setStatus);
+});
+
 function renderUsers() {
   if (!users) return;
+  renderPending();
   const paidGames = games.filter((g) => g.paid);
   renderUnlockBox(paidGames);
   const q = $("userSearch").value.trim().toLowerCase();
@@ -243,8 +331,10 @@ function renderUsers() {
         <div class="user-top">
           <span class="avatar" style="background:${gradientFor(u.username)}">${escapeHTML(u.username[0].toUpperCase())}</span>
           <div><div class="uname">${escapeHTML(u.username)}${u.admin ? `<span class="admin-tag">ADMIN</span>` : ""}</div>
-            <div class="udate">Joined ${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}</div></div>
-          <button class="btn btn-ghost btn-small" style="margin-left:auto" data-admin="${escapeHTML(u.username)}" data-make="${u.admin ? "0" : "1"}">${u.admin ? "Remove admin" : "Make admin"}</button>
+            <div class="udate">Joined ${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"} · last on ${ago(u.lastSeen)}${u.country ? ` · ${flag(u.country)}` : ""}</div>
+            <span class="status-pill ${u.status}">${STATUS_LABEL[u.status] || u.status}</span></div>
+          ${u.admin ? "" : `<button class="bool ${u.status === "approved" ? "true" : "false"}" style="margin-left:auto" data-set-status="${u.status === "approved" ? "pending" : "approved"}" data-user="${escapeHTML(u.username)}" title="Allowed to get on?">${u.status === "approved" ? "TRUE" : "FALSE"}</button>`}
+          <button class="btn btn-ghost btn-small" style="${u.admin ? "margin-left:auto" : ""}" data-admin="${escapeHTML(u.username)}" data-make="${u.admin ? "0" : "1"}">${u.admin ? "Remove admin" : "Make admin"}</button>
           <button class="btn btn-danger" style="margin-left:0" data-del-user="${escapeHTML(u.username)}">Delete</button>
         </div>
         <div class="owned-list">
@@ -350,6 +440,8 @@ $("userRows").addEventListener("click", async (e) => {
     }
     return;
   }
+  const statusBtn = e.target.closest("[data-set-status]");
+  if (statusBtn) return setStatus(statusBtn.dataset.user, statusBtn.dataset.setStatus);
   const delBtn = e.target.closest("[data-del-user]");
   if (delBtn) {
     const name = delBtn.dataset.delUser;

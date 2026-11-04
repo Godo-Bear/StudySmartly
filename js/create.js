@@ -498,8 +498,9 @@ $("myGames").addEventListener("click", async (e) => {
 (async function init() {
   fillIcons();
   initTheme();
-  const [user, games] = await Promise.all([loadMe(), fetchGames()]);
-  me = user;
+  me = await loadMe();
+  if (!siteGate(me)) return; // not approved yet: show the lock screen
+  const games = await fetchGames();
   initAccount(me);
   initSidebar(games, "create");
   if (!me) {

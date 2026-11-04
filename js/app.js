@@ -141,7 +141,9 @@ $("searchForm").addEventListener("submit", (e) => e.preventDefault());
   initTheme();
   $("year").textContent = new Date().getFullYear();
   if (state.query) $("searchInput").value = state.query;
-  [state.games, state.user] = await Promise.all([fetchGames(), loadMe(), isHome() ? loadTop() : null]);
+  state.user = await loadMe();
+  if (!siteGate(state.user)) return; // not approved yet: show the lock screen
+  [state.games] = await Promise.all([fetchGames(), isHome() ? loadTop() : null]);
   initAccount(state.user);
   initSidebar(state.games, state.category ? `category:${state.category}` : state.creator ? "creators" : "home");
   addCreateButton();

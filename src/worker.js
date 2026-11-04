@@ -7,6 +7,9 @@
 //   (a link, or uploaded game files that are stored in KV and served at
 //   /games/<id>/... in a sandbox so they can't touch the rest of the site).
 // - /api/auth/*, /api/me, /api/play/:id  player accounts and paid games.
+// - Site lock: new accounts start "pending" and the owner approves them in
+//   the admin panel. Only approved accounts get the game list (/api/games),
+//   games, saves and the Create tools. /data/games.json isn't public.
 //   Accounts, sessions, unlocks and the links of paid games live in the DB
 //   (Cloudflare KV), never in the public repo.
 
@@ -28,6 +31,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/games/")) return serveGameFile(request, env, url).catch(() => new Response("Error", { status: 500 }));
+    if (url.pathname.startsWith("/data/")) return json({ error: "Log in with an approved account." }, 403);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
 
     try {
@@ -53,8 +57,14 @@ async function handleApi(request, env, url) {
     const key = `user:${name.toLowerCase()}`;
     if (await env.DB.get(key)) throw httpError(409, "That username is taken.");
     const salt = randomHex(16);
-    const user = { username: name, salt, iter: PBKDF2_ITERATIONS, hash: await hashPassword(password, salt), unlocked: [], createdAt: new Date().toISOString() };
+    const user = {
+      username: name, salt, iter: PBKDF2_ITERATIONS, hash: await hashPassword(password, salt), unlocked: [],
+      status: "pending", // the owner approves new accounts in the admin panel
+      createdAt: new Date().toISOString(), lastSeen: new Date().toISOString(),
+      country: (request.cf && request.cf.country) || "",
+    };
     await env.DB.put(key, JSON.stringify(user));
+    await logAttempt(env, request, name, "signup");
     return json({ token: await newSession(env, name), user: publicUser(user) }, 201);
   }
 
@@ -63,9 +73,11 @@ async function handleApi(request, env, url) {
     const user = await getUser(env, String(username || ""));
     const ok = user && (await safeEqual(await hashPassword(String(password || ""), user.salt, user.iter), user.hash));
     if (!ok) {
+      await logAttempt(env, request, String(username || "").trim().slice(0, 20), user ? "wrong-password" : "no-account");
       await sleep(600);
       throw httpError(401, "Wrong username or password.");
     }
+    await logAttempt(env, request, user.username, statusOf(user) === "approved" ? "ok" : statusOf(user));
     return json({ token: await newSession(env, user.username), user: publicUser(user) });
   }
 
@@ -78,7 +90,19 @@ async function handleApi(request, env, url) {
   if (path === "/api/me" && method === "GET") {
     const user = await currentUser(request, env);
     if (!user) throw httpError(401, "Not logged in.");
+    if (!user.lastSeen || Date.now() - new Date(user.lastSeen).getTime() > 60 * 60 * 1000) {
+      user.lastSeen = new Date().toISOString();
+      if (request.cf && request.cf.country) user.country = request.cf.country;
+      await env.DB.put(`user:${user.username.toLowerCase()}`, JSON.stringify(user));
+    }
     return json({ user: publicUser(user) });
+  }
+
+  // The game list, for approved accounts only.
+  if (path === "/api/games" && method === "GET") {
+    await approvedUser(request, env);
+    const res = await env.ASSETS.fetch(new Request(new URL("/data/games.json", request.url)));
+    return new Response(await res.text(), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
   }
 
   // Link for a paid game, only for accounts it's been unlocked for.
@@ -86,8 +110,7 @@ async function handleApi(request, env, url) {
   if (play && method === "GET") {
     const gameUrl = await env.DB.get(`url:${play[1]}`);
     if (!gameUrl) throw httpError(404, "That isn't a paid game.");
-    const user = await currentUser(request, env);
-    if (!user) throw httpError(401, "Log in to play this game.");
+    const user = await approvedUser(request, env);
     if (!user.admin && !user.unlocked.includes(play[1]) && !(await ownsGame(request, env, user, play[1]))) {
       throw httpError(403, "This game hasn't been unlocked for your account yet.");
     }
@@ -113,8 +136,7 @@ async function handleApi(request, env, url) {
   /* ---------- Saved progress for uploaded games ---------- */
   const save = path.match(/^\/api\/saves\/([\w-]+)(\/ticket)?$/);
   if (save) {
-    const user = await currentUser(request, env);
-    if (!user) throw httpError(401, "Log in to save your progress.");
+    const user = await approvedUser(request, env);
     const key = `save:${user.username.toLowerCase()}:${save[1]}`;
     if (save[2] && method === "POST") {
       // Short-lived ticket that lets the game page load *only* this save.
@@ -144,8 +166,7 @@ async function handleApi(request, env, url) {
 
 /* ---------- Creators: add / edit / delete their own games ---------- */
 async function handleCreator(request, env, url, path, method) {
-  const user = await currentUser(request, env);
-  if (!user) throw httpError(401, "Log in to add games.");
+  const user = await approvedUser(request, env);
   if (!env.GITHUB_TOKEN) throw httpError(503, "Adding games isn't set up yet (missing GITHUB_TOKEN).");
   const isMine = (g) => g.owner && g.owner.toLowerCase() === user.username.toLowerCase();
 
@@ -467,21 +488,36 @@ async function handleAdmin(request, env, path, method) {
     return json({ games: await withPrivateUrls(env, games) });
   }
 
+  if (path === "/api/admin/logins" && method === "GET") {
+    const page = await env.DB.list({ prefix: "log:", limit: 200 });
+    return json({ logins: page.keys.map((k) => k.metadata).filter(Boolean) });
+  }
+
   /* ----- Player accounts (for unlocking paid games) ----- */
   if (path === "/api/admin/users" && method === "GET") {
     return json({ users: await listUsers(env) });
   }
 
-  const u = path.match(/^\/api\/admin\/users\/([\w]+)(?:\/(unlock|lock|admin))?$/);
+  const u = path.match(/^\/api\/admin\/users\/([\w]+)(?:\/(unlock|lock|admin|status))?$/);
   if (u) {
     const user = await getUser(env, u[1]);
     if (!user) throw httpError(404, "That account doesn't exist.");
     const key = `user:${user.username.toLowerCase()}`;
 
+    if (u[2] === "status" && method === "POST") {
+      const { status } = await request.json();
+      if (!["approved", "pending", "blocked"].includes(status)) throw httpError(400, "Unknown status.");
+      if (status !== "approved" && me && me.username === user.username) throw httpError(400, "You can't lock your own account.");
+      user.status = status;
+      user.statusBy = me ? me.username : "admin code";
+      user.statusAt = new Date().toISOString();
+      await env.DB.put(key, JSON.stringify(user));
+      return json({ user: publicUser(user) });
+    }
     if (u[2] === "admin" && method === "POST") {
       const { admin } = await request.json();
       if (!admin && me && me.username === user.username) throw httpError(400, "You can't remove your own admin. Ask another admin.");
-      if (admin) user.admin = true; else delete user.admin;
+      if (admin) { user.admin = true; user.status = "approved"; } else delete user.admin;
       await env.DB.put(key, JSON.stringify(user));
       return json({ user: publicUser(user) });
     }
@@ -537,11 +573,49 @@ async function getUser(env, name) {
   user.unlocked = Array.isArray(user.unlocked) ? user.unlocked : [];
   return user;
 }
+// Login log for the admin panel. Newest first (keys sort by inverted time),
+// kept for 30 days. Everything is in the key's metadata so one list call reads it.
+async function logAttempt(env, request, username, result) {
+  try {
+    const at = Date.now();
+    const key = `log:${String(9999999999999 - at).padStart(13, "0")}:${randomHex(3)}`;
+    const cf = request.cf || {};
+    await env.DB.put(key, "", {
+      expirationTtl: 60 * 60 * 24 * 30,
+      metadata: {
+        username: String(username || "").slice(0, 20), result, at: new Date(at).toISOString(),
+        country: cf.country || "", city: String(cf.city || "").slice(0, 40),
+        device: deviceOf(request.headers.get("User-Agent") || ""),
+      },
+    });
+  } catch {}
+}
+function deviceOf(ua) {
+  const os = /iPhone|iPad/.test(ua) ? "iPhone/iPad" : /Android/.test(ua) ? "Android" : /CrOS/.test(ua) ? "Chromebook"
+    : /Windows/.test(ua) ? "Windows" : /Mac OS X/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "Unknown";
+  const browser = /Edg\//.test(ua) ? "Edge" : /Chrome\//.test(ua) ? "Chrome" : /Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "";
+  return browser ? `${browser} on ${os}` : os;
+}
+
+// Accounts made before the site lock existed have no status: they stay approved.
+function statusOf(user) {
+  return user.admin ? "approved" : user.status || "approved";
+}
 function publicUser(user) {
   return {
     username: user.username, unlocked: user.unlocked, unlockInfo: user.unlockInfo || {},
-    admin: !!user.admin, createdAt: user.createdAt,
+    admin: !!user.admin, status: statusOf(user), createdAt: user.createdAt,
+    lastSeen: user.lastSeen || "", country: user.country || "",
   };
+}
+// The logged-in account, if the owner has approved it.
+async function approvedUser(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) throw httpError(401, "Log in to use StudySmartly.");
+  const status = statusOf(user);
+  if (status === "blocked") throw httpError(403, "This account has been blocked by the owner.");
+  if (status !== "approved") throw httpError(403, "The owner hasn't unlocked your account yet.");
+  return user;
 }
 async function listUsers(env) {
   const users = [];

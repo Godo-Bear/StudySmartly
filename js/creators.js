@@ -53,7 +53,9 @@ $("searchForm").addEventListener("submit", (e) => {
   fillIcons();
   initTheme();
   $("year").textContent = new Date().getFullYear();
-  const [games, user] = await Promise.all([fetchGames(), loadMe()]);
+  const user = await loadMe();
+  if (!siteGate(user)) return; // not approved yet: show the lock screen
+  const games = await fetchGames();
   initAccount(user);
   initSidebar(games, "creators");
   addCreateButton();

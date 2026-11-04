@@ -266,8 +266,9 @@ $("shareBtn").addEventListener("click", async () => {
   fillIcons();
   initTheme();
   $("year").textContent = new Date().getFullYear();
-  const [games, me] = await Promise.all([fetchGames(), loadMe()]);
-  user = me;
+  user = await loadMe();
+  if (!siteGate(user)) return; // not approved yet: show the lock screen
+  const games = await fetchGames();
   initAccount(user);
   setTimeout(previewSaveBar, 0);
   const current = games.find((g) => String(g.id) === new URLSearchParams(location.search).get("id"));

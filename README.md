@@ -37,6 +37,12 @@ How a player gets a paid game:
 2. They pay the game's owner however you like, such as cash or PayPal, and tell the owner their username.
 3. The game's creator opens **My games → 🔓 Unlock** on the Create page, types the buyer's username and picks how they paid. They can also see who owns the game, and lock it again. Or an admin opens **Player accounts → Unlock a paid game** in the admin panel. They pick the account and the game, choose how it was paid (Cash, for example), and click Unlock. The panel records who unlocked it, when, and the payment method.
 
+## Site lock: the owner allows every account
+- People need an account the owner has allowed to use the site. Without one, every page shows a "StudySmartly" screen explaining that the owner checks each account to keep the site safe.
+- New accounts start on **FALSE**. In the admin panel, **🛡️ Who can get on** lists every username. Click **FALSE** to set it to **TRUE** and let them on, and click TRUE to take access away again. Accounts made before the lock existed, and admins, are TRUE.
+- **👀 Login attempts** shows everyone who logged in or signed up, and failed tries, for the last 30 days: when, username, what happened, rough location and device.
+- The server enforces the lock: the game list (`/api/games`), games, saves and Create tools refuse anyone who isn't allowed, and `/data/games.json` isn't public.
+
 ## Admin accounts
 Anyone can make an account on `login.html`. In the admin panel, click **Make admin** next to an account.
 

@@ -113,6 +113,17 @@
       </div>
 
       <div style="display:flex;flex-direction:column;gap:28px;min-width:0">
+      <div class="panel approve-panel" id="approvePanel">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <h2 style="margin:0">🛡️ Who can get on <span id="pendingCount" class="count-bubble" title="Waiting">0</span></h2>
+        </div>
+        <p class="sub">Every new account starts on <b>FALSE</b>. Click it to set it to <b>TRUE</b> and let them on. Click TRUE to take access away again.</p>
+        <div class="table-wrap"><table class="access-table">
+          <thead><tr><th>Username</th><th>Allowed</th><th>Signed up</th><th>Last on</th></tr></thead>
+          <tbody id="pendingRows"><tr><td colspan="4" class="muted-note">Loading…</td></tr></tbody>
+        </table></div>
+      </div>
+
       <div class="panel">
         <div class="status" id="status"><span class="dot"></span><span id="statusText">Connecting…</span></div>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
@@ -170,6 +181,24 @@
           <input id="userSearch" type="search" placeholder="Search usernames…" autocomplete="off">
         </div>
         <div id="userRows"></div>
+      </div>
+
+      <div class="panel">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <h2 style="margin:0">👀 Login attempts</h2>
+          <button class="btn btn-ghost btn-small" id="refreshLoginsBtn" style="margin-left:auto">↻ Refresh</button>
+        </div>
+        <p class="sub">Everyone who tried to log in or sign up in the last 30 days, newest first.</p>
+        <div class="field" style="margin-bottom:4px">
+          <select id="loginFilter">
+            <option value="">All attempts</option>
+            <option value="problems">Only failed / waiting / blocked</option>
+          </select>
+        </div>
+        <div class="table-wrap"><table class="log-table">
+          <thead><tr><th>When</th><th>Username</th><th>What happened</th><th>Where</th><th>Device</th></tr></thead>
+          <tbody id="loginRows"><tr><td colspan="5" class="muted-note">Loading…</td></tr></tbody>
+        </table></div>
       </div>
       </div>
     </div>

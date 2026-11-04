@@ -114,7 +114,8 @@ applyTheme(getTheme());
 /* ---------- Games data + cards (shared by home and play pages) ---------- */
 async function fetchGames() {
   try {
-    const res = await fetch(`data/games.json?t=${Date.now()}`); // cache-bust for fresh adds
+    // Only approved accounts get the game list.
+    const res = await fetch("/api/games", { headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {} });
     if (!res.ok) throw new Error(res.status);
     const data = await res.json();
     return (Array.isArray(data) ? data : data.games || [])
@@ -308,4 +309,62 @@ function initSidebar(games, active = "") {
   document.getElementById("menuBtn")?.addEventListener("click", () => setOpen(!document.body.classList.contains("sidebar-open")));
   document.getElementById("sidebarBackdrop").addEventListener("click", () => setOpen(false));
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") setOpen(false); });
+}
+
+/* ---------- Site lock ----------
+   Every account is checked by the owner before it can get on. Pages call
+   siteGate(user) first; if the visitor isn't approved it shows this screen
+   instead of the page and returns false. (The server enforces it too.) */
+function siteGate(user) {
+  const status = user ? (user.admin ? "approved" : user.status || "approved") : "loggedout";
+  if (status === "approved") return true;
+
+  const name = user ? escapeHTML(user.username) : "";
+  const screens = {
+    loggedout: {
+      title: "Welcome to StudySmartly",
+      text: `To keep StudySmartly safe, <b>every account is checked by the owner</b> before it can get on. Log in, or make an account and ask the owner to unlock it.`,
+      buttons: `<a class="btn btn-primary gate-main" href="${loginURL("login")}">Log in</a>
+                <a class="btn gate-link" href="${loginURL("signup")}">Make an account</a>`,
+    },
+    pending: {
+      title: "Almost there",
+      text: `Your account (<b>${name}</b>) isn't unlocked yet. To keep StudySmartly safe, <b>the owner checks every new account by hand</b> before it can get on, so it may take a little while. Once it's unlocked, check again.`,
+      buttons: `<button class="btn btn-primary gate-main" id="gateCheck">I've been unlocked: check again</button>
+                <button class="btn gate-link" id="gateLogout">Log out</button>`,
+    },
+    blocked: {
+      title: "Account blocked",
+      text: `Your account (<b>${name}</b>) can't get on StudySmartly right now. If you think this is a mistake, talk to the owner.`,
+      buttons: `<button class="btn gate-link" id="gateLogout">Log out</button>`,
+    },
+  };
+  const sc = screens[status] || screens.pending;
+  document.title = `${sc.title} · StudySmartly`;
+  document.body.classList.add("gated");
+  document.body.insertAdjacentHTML("beforeend", `
+    <div class="site-gate" role="dialog" aria-modal="true" aria-labelledby="gateTitle">
+      <div class="gate-card">
+        <div class="gate-logo">
+          <div class="gate-ring"><img src="/icons/icon-192.png?v=2" alt="" width="104" height="104"></div>
+          <div class="gate-name">Study<span>Smartly</span></div>
+          <div class="gate-tag">Learn smarter, together</div>
+        </div>
+        <h1 id="gateTitle">${sc.title}</h1>
+        <p>${sc.text}</p>
+        <div class="gate-safe">🛡️ Accounts are checked to keep StudySmartly safe for everyone.</div>
+        <div class="gate-buttons">${sc.buttons}</div>
+      </div>
+    </div>`);
+  document.getElementById("gateLogout")?.addEventListener("click", logOut);
+  document.getElementById("gateCheck")?.addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "Checking…";
+    const me = await loadMe();
+    if (me && (me.admin || me.status === "approved")) return location.reload();
+    toast(me && me.status === "blocked" ? "Your account has been blocked." : "Not unlocked yet. Check back soon!", true);
+    e.target.disabled = false;
+    e.target.textContent = "I've been unlocked: check again";
+  });
+  return false;
 }

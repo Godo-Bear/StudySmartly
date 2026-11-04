@@ -20,7 +20,7 @@ function setMode(m) {
   const signup = m === "signup";
   $("authTitle").textContent = signup ? "Create your account" : "Welcome back 👋";
   $("authSub").textContent = signup
-    ? "It's free. You need one to own paid games."
+    ? "The owner checks every new account to keep StudySmartly safe."
     : "Log in to play your paid games, or to use the admin panel.";
   $("authSubmit").textContent = signup ? "Sign up" : "Log in";
   $("authPass").autocomplete = signup ? "new-password" : "current-password";
