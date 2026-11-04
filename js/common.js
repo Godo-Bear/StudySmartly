@@ -293,6 +293,7 @@ function initSidebar(games, active = "") {
     <aside class="sidebar" id="sidebar" aria-label="Site menu">
       <nav>
         ${link("./", "🏠", "Home", "home", games.length)}
+        ${link("chat.html", "💬", "Friends & Chat", "chat")}
         <div class="side-heading">Game types</div>
         ${cats.length
           ? cats.map(([name, n]) => link(categoryURL(name), categoryIcon(name), name, `category:${name}`, n)).join("")
@@ -303,6 +304,7 @@ function initSidebar(games, active = "") {
       </nav>
     </aside>`);
   document.body.classList.add("has-sidebar");
+  refreshSidebarBadge();
 
   // ☰ button for small screens
   const headerInner = document.querySelector(".header-inner");
@@ -412,4 +414,18 @@ function askConfirm(message, { yes = "Yes", danger = false } = {}) {
     document.body.appendChild(wrap);
     wrap.querySelector('[data-ask="yes"]').focus();
   });
+}
+
+// Red badge on "Friends & Chat": unread messages + friend requests
+async function refreshSidebarBadge() {
+  const linkEl = document.querySelector('.side-link[href="chat.html"]');
+  if (!linkEl || !getToken()) return;
+  try {
+    const { unread, requests } = await userApi("/chat/unread");
+    const n = (unread || 0) + (requests || 0);
+    let badge = linkEl.querySelector(".side-badge");
+    if (!badge) { badge = document.createElement("span"); badge.className = "side-badge"; linkEl.appendChild(badge); }
+    badge.textContent = n > 99 ? "99+" : n;
+    badge.classList.toggle("hidden", !n);
+  } catch {}
 }

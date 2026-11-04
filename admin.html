@@ -183,6 +183,15 @@
         <div id="userRows"></div>
       </div>
 
+      <div class="panel" id="chatReportsPanel">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <h2 style="margin:0">💬 Reported messages <span id="chatReportCount" class="count-bubble zero">0</span></h2>
+          <button class="btn btn-ghost btn-small" id="refreshChatReportsBtn" style="margin-left:auto">↻ Refresh</button>
+        </div>
+        <p class="sub">Chat messages players reported. Delete anything unkind or unsafe; you can also set the sender to FALSE in Who can get on.</p>
+        <div id="chatReportRows"><p class="muted-note">Loading…</p></div>
+      </div>
+
       <div class="panel" id="reportsPanel">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
           <h2 style="margin:0">🚩 Reports <span id="reportCount" class="count-bubble zero">0</span></h2>

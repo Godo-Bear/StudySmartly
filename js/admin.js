@@ -214,6 +214,7 @@ async function loadUsers() {
   $("userRows").innerHTML = `<p class="muted-note">Loading accounts…</p>`;
   loadLogins();
   loadReports();
+  loadChatReports();
   try {
     users = (await api("/users")).users;
     renderUsers();
@@ -293,6 +294,43 @@ async function resetPassword(username) {
     if (!handleAuthError(err)) toast(err.message, true);
   }
 }
+
+/* ---------- 💬 Reported chat messages ---------- */
+async function loadChatReports() {
+  try {
+    const { reports } = await api("/chat/reports");
+    const open = reports.filter((r) => !r.resolvedBy);
+    $("chatReportCount").textContent = open.length;
+    $("chatReportCount").classList.toggle("zero", !open.length);
+    $("chatReportsPanel").classList.toggle("has-waiting", open.length > 0);
+    $("chatReportRows").innerHTML = reports.length
+      ? reports.slice(0, 50).map((r) => `
+        <div class="report-row ${r.resolvedBy ? "done" : ""}">
+          <div class="report-info">
+            <div><b>${escapeHTML(r.from)}</b> in ${escapeHTML(r.where)}</div>
+            <div class="report-note">${r.deleted ? "<i>(deleted)</i> " : ""}“${escapeHTML(r.text)}”</div>
+            <div class="udate">reported by ${escapeHTML(r.reporter)} · ${ago(new Date(r.at).toISOString())}${r.resolvedBy ? ` · ✅ handled by ${escapeHTML(r.resolvedBy)}` : ""}</div>
+          </div>
+          ${r.resolvedBy ? "" : `
+            <button class="btn btn-danger" data-chat-delete="${r.messageId}">Delete message</button>
+            <button class="btn btn-ghost btn-small" data-chat-resolve="${r.id}">It's fine</button>`}
+        </div>`).join("")
+      : `<p class="muted-note">No reported messages. 🎉</p>`;
+  } catch (err) {
+    if (!handleAuthError(err)) $("chatReportRows").innerHTML = `<p class="muted-note">Couldn't load: ${escapeHTML(err.message)}</p>`;
+  }
+}
+$("refreshChatReportsBtn").addEventListener("click", loadChatReports);
+$("chatReportRows").addEventListener("click", async (e) => {
+  const del = e.target.closest("[data-chat-delete]"), ok = e.target.closest("[data-chat-resolve]");
+  if (!del && !ok) return;
+  if (del && !(await askConfirm("Delete this message for everyone?", { yes: "Delete", danger: true }))) return;
+  try {
+    await api(del ? `/chat/messages/${del.dataset.chatDelete}/delete` : `/chat/reports/${ok.dataset.chatResolve}/resolve`, { method: "POST" });
+    toast(del ? "Message deleted" : "Marked as fine");
+    loadChatReports();
+  } catch (err) { if (!handleAuthError(err)) toast(err.message, true); }
+});
 
 /* ---------- 🚩 Reports ---------- */
 const REASON = { broken: "💥 Broken / won't load", inappropriate: "⚠️ Inappropriate", other: "💬 Something else" };

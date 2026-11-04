@@ -28,10 +28,12 @@
   // ACCESS holds each account's TRUE/FALSE "allowed" setting.
   "durable_objects": { "bindings": [
     { "name": "PLAYS", "class_name": "PlayCounter" },
-    { "name": "ACCESS", "class_name": "AccessList" }
+    { "name": "ACCESS", "class_name": "AccessList" },
+    { "name": "CHAT", "class_name": "ChatHub" }
   ] },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["PlayCounter"] },
-    { "tag": "v2", "new_sqlite_classes": ["AccessList"] }
+    { "tag": "v2", "new_sqlite_classes": ["AccessList"] },
+    { "tag": "v3", "new_sqlite_classes": ["ChatHub"] }
   ]
 }

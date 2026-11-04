@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Friends & Chat · StudySmartly</title>
+  <meta name="description" content="StudySmartly: play games made by me and my friends.">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png?v=2">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png?v=2">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png?v=2">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0d0e1a">
+  <meta name="apple-mobile-web-app-title" content="StudySmartly">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bungee&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script src="js/common.js"></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="./" class="logo">
+        <div class="logo-mark" data-icon="logo"></div>
+        <div class="logo-text">Study<span>Smartly</span></div>
+      </a>
+      <div class="header-actions">
+        <form class="search" id="searchForm" role="search">
+          <input id="searchInput" type="search" placeholder="Search game or creator" aria-label="Search games" autocomplete="off">
+          <button type="submit" aria-label="Search" data-icon="search"></button>
+        </form>
+        <button class="icon-btn" data-theme-toggle aria-label="Toggle dark mode"></button>
+        <div id="accountSlot"></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container chat-page">
+    <div class="chat-app" id="chatApp">
+      <!-- Left: chats, friends, add / join -->
+      <aside class="chat-side panel">
+        <div class="chat-tabs" role="tablist">
+          <button class="active" data-tab="chats" role="tab">💬 Chats <span class="tab-badge hidden" id="chatsBadge"></span></button>
+          <button data-tab="friends" role="tab">👥 Friends <span class="tab-badge hidden" id="friendsBadge"></span></button>
+        </div>
+
+        <div data-pane="chats">
+          <div class="chat-actions">
+            <button class="btn btn-primary btn-small" id="newGroupBtn">＋ New group</button>
+            <form id="joinForm" class="join-form">
+              <input id="joinCode" placeholder="Room code" maxlength="8" autocomplete="off" autocapitalize="characters" aria-label="Room code">
+              <button class="btn btn-ghost btn-small" type="submit">Join</button>
+            </form>
+          </div>
+          <div id="roomList" class="room-list"><p class="muted-note">Loading…</p></div>
+        </div>
+
+        <div data-pane="friends" class="hidden">
+          <form id="addFriendForm" class="add-friend">
+            <input id="friendName" placeholder="Add a friend by username" maxlength="20" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Friend's username">
+            <button class="btn btn-primary btn-small" type="submit">Add</button>
+          </form>
+          <div id="requestList"></div>
+          <div id="friendList" class="friend-list"></div>
+          <details class="blocked-box" id="blockedBox"><summary>Blocked</summary><div id="blockedList"></div></details>
+        </div>
+      </aside>
+
+      <!-- Right: the open conversation -->
+      <section class="chat-main panel" id="chatMain">
+        <div class="chat-empty" id="chatEmpty">
+          <div class="big">💬</div>
+          <h2>Friends & Chat</h2>
+          <p class="sub">Add friends by username and message them, or make a group and share its room code.</p>
+        </div>
+        <div class="chat-room hidden" id="chatRoom">
+          <header class="room-head">
+            <button class="btn btn-ghost btn-small back-btn" id="backBtn" aria-label="Back to chats">←</button>
+            <div class="room-title">
+              <h2 id="roomName"></h2>
+              <div class="room-sub" id="roomSub"></div>
+            </div>
+            <div class="room-code hidden" id="roomCodeBox" title="Share this so friends can join">
+              <span>Room code</span><b id="roomCode"></b>
+              <button class="btn btn-ghost btn-small" id="copyCode">Copy</button>
+            </div>
+            <button class="btn btn-ghost btn-small" id="roomMenuBtn" aria-label="More">⋯</button>
+            <div class="room-menu hidden" id="roomMenu"></div>
+          </header>
+          <div class="messages" id="messages" aria-live="polite"></div>
+          <form class="composer" id="composer">
+            <input id="msgInput" placeholder="Message…" maxlength="1000" autocomplete="off" aria-label="Message">
+            <button class="btn btn-primary" type="submit" id="sendBtn">Send</button>
+          </form>
+        </div>
+      </section>
+    </div>
+    <p class="chat-safety">🛡️ Be kind. Never share passwords, your address or other private info. Use <b>⋯ → Report</b> on a message if someone's being unkind, and <b>Block</b> to stop them messaging you.</p>
+  </main>
+
+  <script src="js/chat.js"></script>
+</body>
+</html>

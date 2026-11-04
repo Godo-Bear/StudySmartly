@@ -15,6 +15,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { writeOverview, overviewErrorMessage } from "./overview.js";
+export { ChatHub } from "./chat.js";
 
 const FILE_PATH = "data/games.json";
 const IMAGE_DIR = "images";
@@ -163,6 +164,9 @@ async function handleApi(request, env, url) {
     if (env.PLAYS) await playCounter(env).hit(hit[1], request.headers.get("CF-Connecting-IP") || "", user ? user.username.toLowerCase() : "");
     return json({ ok: true });
   }
+
+  // 💬 Friends & chat (allowed accounts only)
+  if (path.startsWith("/api/chat/")) return handleChat(request, env, url, path, method);
 
   // ✨ AI overview: written once per game version, then served from KV
   const ov = path.match(/^\/api\/overview\/([\w-]+)(\/refresh)?$/);
@@ -401,6 +405,59 @@ async function handleCreator(request, env, url, path, method) {
   return json({ error: "Not found" }, 404);
 }
 
+/* ---------- 💬 Friends & chat ---------- */
+function chatHub(env) {
+  return env.CHAT.get(env.CHAT.idFromName("all"));
+}
+async function handleChat(request, env, url, path, method) {
+  if (!env.CHAT) throw httpError(503, "Chat isn't set up yet.");
+  // The live connection: a one-minute ticket from /api/chat/ticket proves who it is.
+  if (path === "/api/chat/ws") return chatHub(env).fetch(request);
+
+  const user = await approvedUser(request, env);
+  const me = user.username.toLowerCase(), name = user.username;
+  const hub = chatHub(env);
+  const body = method === "POST" ? await request.json().catch(() => ({})) : {};
+  const done = (r) => (r && r.error ? json({ error: r.error }, r.status || 400) : json(r));
+  // Someone else by username: must be a real, allowed account
+  const person = async (who) => {
+    const u = await getUser(env, String(who || "").trim());
+    if (!u) throw httpError(404, `There's no account called “${String(who || "").trim().slice(0, 20)}”.`);
+    const row = await accessList(env).get(u.username.toLowerCase());
+    if ((row && row.status === "deleted")) throw httpError(404, "That account doesn't exist.");
+    return u;
+  };
+
+  if (path === "/api/chat/state" && method === "GET") return done(await hub.state(me, name));
+  if (path === "/api/chat/unread" && method === "GET") return done(await hub.unread(me));
+  if (path === "/api/chat/ticket" && method === "POST") return done(await hub.ticket(me, name));
+  if (path === "/api/chat/friends" && method === "POST") {
+    const o = await person(body.username);
+    return done(await hub.friendRequest(me, name, o.username.toLowerCase(), o.username));
+  }
+  const fr = path.match(/^\/api\/chat\/friends\/([\w]+)\/(accept|decline|remove|block|unblock|dm)$/);
+  if (fr && method === "POST") {
+    const other = fr[1].toLowerCase();
+    if (fr[2] === "accept" || fr[2] === "decline") return done(await hub.respond(me, other, fr[2] === "accept"));
+    if (fr[2] === "remove") return done(await hub.unfriend(me, other));
+    if (fr[2] === "block" || fr[2] === "unblock") return done(await hub.block(me, other, fr[2] === "block"));
+    if (fr[2] === "dm") return done(await hub.directMessage(me, other));
+  }
+  if (path === "/api/chat/groups" && method === "POST") return done(await hub.createGroup(me, name, body.name));
+  if (path === "/api/chat/join" && method === "POST") return done(await hub.join(me, name, body.code));
+  const rm = path.match(/^\/api\/chat\/rooms\/([^/]+)\/(messages|leave|read)$/);
+  if (rm) {
+    const room = decodeURIComponent(rm[1]);
+    if (rm[2] === "messages" && method === "GET") return done(await hub.messages(me, room, Number(url.searchParams.get("before")) || 0));
+    if (rm[2] === "messages" && method === "POST") return done(await hub.send(me, name, room, body.text));
+    if (rm[2] === "leave" && method === "POST") return done(await hub.leave(me, name, room));
+    if (rm[2] === "read" && method === "POST") return done(await hub.markRead(me, room, Number(body.id) || 0));
+  }
+  const rep = path.match(/^\/api\/chat\/messages\/(\d+)\/report$/);
+  if (rep && method === "POST") return done(await hub.report(me, Number(rep[1]), body.reason));
+  return json({ error: "Not found" }, 404);
+}
+
 // One game from the live (deployed) games list.
 async function liveGame(request, env, id) {
   try {
@@ -636,6 +693,17 @@ async function handleAdmin(request, env, path, method) {
     return json({ games: await withPrivateUrls(env, games) });
   }
 
+  if (path === "/api/admin/chat/reports" && method === "GET") {
+    return json(env.CHAT ? await chatHub(env).adminReports() : { reports: [] });
+  }
+  const cr = path.match(/^\/api\/admin\/chat\/(messages|reports)\/(\d+)\/(delete|resolve)$/);
+  if (cr && method === "POST") {
+    const by = me ? me.username : "admin code";
+    if (cr[1] === "messages" && cr[3] === "delete") await chatHub(env).adminDeleteMessage(Number(cr[2]), by);
+    else if (cr[1] === "reports" && cr[3] === "resolve") await chatHub(env).adminResolve(Number(cr[2]), by);
+    return json({ ok: true });
+  }
+
   if (path === "/api/admin/reports" && method === "GET") {
     return json({ reports: await playCounter(env).reports() });
   }
@@ -719,6 +787,7 @@ async function handleAdmin(request, env, path, method) {
       if (me && me.username === user.username) throw httpError(400, "You can't delete your own account here.");
       await accessList(env).set(user.username.toLowerCase(), "deleted");
       await env.DB.delete(key);
+      if (env.CHAT) await chatHub(env).forget(user.username.toLowerCase());
       return json({ ok: true });
     }
   }

@@ -54,6 +54,19 @@ How a player gets a paid game:
 - **⭐ Favourite** button, plus **Recently Played** and **Your Favourites** at the top of the home page, saved to their account.
 - **🚩 Report** button for broken or inappropriate games.
 
+## 💬 Friends & Chat
+`chat.html` opens from the sidebar link above the game types, which has a red badge for unread messages and friend requests.
+- **Friends:** add people by username. They accept or decline the request.
+- **Direct messages:** chat with any friend.
+- **Group chats:** each group gets a room code like `K7M-4QX`, shown at the top of the group with a Copy button. Anyone allowed onto the site can join with the code, up to 50 people per group.
+- **Live:** messages arrive instantly over a WebSocket to the `ChatHub` Durable Object (SQLite). Each player connects with a one-minute ticket.
+- **Safety:**
+  - Only allowed (TRUE) accounts can chat.
+  - **Block** stops someone's friend requests and messages.
+  - **Report** sends a message to **💬 Reported messages** in the admin panel. Admins can delete it there, and it disappears for everyone straight away.
+  - Sending is limited to 8 messages per 10 seconds.
+  - Deleting an account removes it from all chats.
+
 ## ✨ AI overview
 Under **About this game**, Cloudflare's free Workers AI (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`, the `AI` binding) reads the game and explains it: summary, goal, how to play, controls, tips and what it's good for.
 - **Uploaded games:** it reads the text files from KV.
