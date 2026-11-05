@@ -330,6 +330,77 @@ async function loadOverview(refresh = false) {
 }
 $("aiRefresh").addEventListener("click", () => loadOverview(true));
 
+/* ---------- 💬 Comments ---------- */
+let comments = { comments: [], owner: "", canModerate: false };
+function ago(at) {
+  const s = Math.round((Date.now() - at) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  if (s < 86400 * 30) return `${Math.round(s / 86400)} days ago`;
+  return new Date(at).toLocaleDateString();
+}
+function renderComments() {
+  const list = comments.comments;
+  $("commentCount").textContent = list.length ? `(${list.length})` : "";
+  const me = user ? user.username.toLowerCase() : "";
+  $("commentList").innerHTML = list.length
+    ? list.map((c) => {
+        const mine = c.user === me;
+        const isCreator = comments.owner && c.user === comments.owner.toLowerCase();
+        return `
+          <div class="comment" data-id="${c.id}">
+            <span class="avatar sm" style="background:${gradientFor(c.name)}">${escapeHTML(initials(c.name))}</span>
+            <div class="comment-body">
+              <div class="comment-top"><b>${escapeHTML(c.name)}</b>${isCreator ? `<span class="creator-tag">Creator</span>` : ""}<time>${escapeHTML(ago(c.at))}</time></div>
+              <p>${escapeHTML(c.text)}</p>
+              <div class="comment-actions">
+                ${mine || comments.canModerate ? `<button data-del-comment="${c.id}">Delete</button>` : ""}
+                ${!mine ? `<button data-report-comment="${c.id}">Report</button>` : ""}
+              </div>
+            </div>
+          </div>`;
+      }).join("")
+    : `<p class="muted-note">No comments yet. Be the first!</p>`;
+}
+async function loadComments() {
+  try {
+    comments = await userApi(`/comments/${encodeURIComponent(game.id)}`);
+    renderComments();
+  } catch (err) {
+    $("commentList").innerHTML = `<p class="muted-note">${escapeHTML(err.message)}</p>`;
+  }
+}
+$("commentText").addEventListener("input", () => { $("commentChars").textContent = `${$("commentText").value.length} / 500`; });
+$("commentText").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) $("commentForm").requestSubmit();
+});
+$("commentForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = $("commentText").value.trim();
+  if (!text) return;
+  $("commentPost").disabled = true;
+  try {
+    const { comment } = await userApi(`/comments/${encodeURIComponent(game.id)}`, { method: "POST", body: JSON.stringify({ text }) });
+    comments.comments.unshift(comment);
+    renderComments();
+    $("commentText").value = "";
+    $("commentChars").textContent = "0 / 500";
+  } catch (err) { toast(err.message, true); }
+  $("commentPost").disabled = false;
+});
+$("commentList").addEventListener("click", async (e) => {
+  const del = e.target.closest("[data-del-comment]"), rep = e.target.closest("[data-report-comment]");
+  if (!del && !rep) return;
+  const id = Number((del || rep).dataset[del ? "delComment" : "reportComment"]);
+  if (!(await askConfirm(del ? "Delete this comment?" : "Report this comment to the admins?", { yes: del ? "Delete" : "Report", danger: true }))) return;
+  try {
+    await userApi(`/comments/c/${id}/${del ? "delete" : "report"}`, { method: "POST" });
+    if (del) { comments.comments = comments.comments.filter((c) => c.id !== id); renderComments(); toast("Comment deleted"); }
+    else toast("Thanks. An admin will look at it 🛡️");
+  } catch (err) { toast(err.message, true); }
+});
+
 async function loadSocial() {
   try {
     const [votes, lib] = await Promise.all([userApi(`/votes/${encodeURIComponent(game.id)}`), userApi("/library")]);
@@ -404,6 +475,7 @@ $("shareBtn").addEventListener("click", async () => {
   if (game) {
     checkFraming();
     loadSocial();
+    loadComments();
     loadOverview();
     // The game's creator or an admin can ask for a fresh overview
     if (user && (user.admin || isOwner(game, user))) $("aiRefresh").classList.remove("hidden");

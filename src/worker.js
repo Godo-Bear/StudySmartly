@@ -218,6 +218,44 @@ async function handleApi(request, env, url) {
     }
   }
 
+  // 💬 Comments on a game
+  const cm = path.match(/^\/api\/comments\/([\w-]+)$/);
+  if (cm) {
+    const user = await approvedUser(request, env);
+    const game = await liveGame(request, env, cm[1]);
+    if (!game) throw httpError(404, "That game isn't on the site (yet).");
+    const isMod = user.admin || (game.owner && game.owner.toLowerCase() === user.username.toLowerCase());
+    if (method === "GET") {
+      return json({ ...(await playCounter(env).comments(game.id)), owner: game.owner || "", canModerate: !!isMod });
+    }
+    if (method === "POST") {
+      const { text } = await request.json();
+      const t = String(text || "").trim();
+      if (!t) throw httpError(400, "Write something first.");
+      if (t.length > 500) throw httpError(400, "Comments can be up to 500 characters.");
+      const r = await playCounter(env).addComment(game.id, user.username.toLowerCase(), user.username, t);
+      if (r.error) throw httpError(r.status, r.error);
+      return json(r, 201);
+    }
+  }
+  const ca = path.match(/^\/api\/comments\/c\/(\d+)\/(delete|report)$/);
+  if (ca && method === "POST") {
+    const user = await approvedUser(request, env);
+    const c = await playCounter(env).getComment(Number(ca[1]));
+    if (!c || c.deleted) throw httpError(404, "That comment isn't there anymore.");
+    const me = user.username.toLowerCase();
+    if (ca[2] === "delete") {
+      const game = await liveGame(request, env, c.game);
+      const isOwner = game && game.owner && game.owner.toLowerCase() === me;
+      if (c.user !== me && !user.admin && !isOwner) throw httpError(403, "You can only delete your own comments.");
+      return json(await playCounter(env).deleteComment(c.id, user.username));
+    }
+    if (c.user === me) throw httpError(400, "That's your own comment.");
+    const r = await playCounter(env).reportComment(c.id, user.username);
+    if (r.error) throw httpError(r.status, r.error);
+    return json(r);
+  }
+
   // 👍 / 👎
   if (path === "/api/votes/top" && method === "GET") {
     await approvedUser(request, env);
@@ -744,6 +782,20 @@ async function handleAdmin(request, env, path, method) {
     return json({ games: await withPrivateUrls(env, games) });
   }
 
+  if (path === "/api/admin/comments/reports" && method === "GET") {
+    const reports = await playCounter(env).commentReports();
+    const { games } = await readGames(env);
+    for (const r of reports) r.gameName = (games.find((g) => g.id === r.game) || {}).name || "(deleted game)";
+    return json({ reports });
+  }
+  const acm = path.match(/^\/api\/admin\/comments\/(\d+)\/(delete|resolve)$/);
+  if (acm && method === "POST") {
+    const by = me ? me.username : "admin code";
+    if (acm[2] === "delete") await playCounter(env).deleteComment(Number(acm[1]), by);
+    else await playCounter(env).resolveCommentReport(Number(acm[1]), by);
+    return json({ ok: true });
+  }
+
   if (path === "/api/admin/chat/reports" && method === "GET") {
     return json(env.CHAT ? await chatHub(env).adminReports() : { reports: [] });
   }
@@ -1194,7 +1246,49 @@ export class PlayCounter extends DurableObject {
     this.sql.exec("CREATE TABLE IF NOT EXISTS favs (user TEXT NOT NULL, game TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (user, game))");
     this.sql.exec(`CREATE TABLE IF NOT EXISTS reports (id INTEGER PRIMARY KEY AUTOINCREMENT, game TEXT NOT NULL, user TEXT NOT NULL,
       reason TEXT NOT NULL, note TEXT, at TEXT NOT NULL, resolved_by TEXT, resolved_at TEXT)`);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, game TEXT NOT NULL, user TEXT NOT NULL,
+      name TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)`);
+    this.sql.exec("CREATE INDEX IF NOT EXISTS comments_game ON comments (game, id)");
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS comment_reports (id INTEGER PRIMARY KEY AUTOINCREMENT, comment INTEGER NOT NULL,
+      reporter TEXT NOT NULL, at INTEGER NOT NULL, resolved_by TEXT)`);
     this.recent = new Map(); // "ip|game" -> time, to ignore spam clicks
+    this.lastComment = new Map(); // user -> time, to slow down spam
+  }
+
+  /* ----- 💬 comments on games ----- */
+  async comments(game) {
+    const rows = this.sql.exec("SELECT id, user, name, text, at FROM comments WHERE game = ? AND deleted = 0 ORDER BY id DESC LIMIT 200", game).toArray();
+    return { comments: rows, count: rows.length };
+  }
+  async addComment(game, user, name, text) {
+    const now = Date.now();
+    if (now - (this.lastComment.get(user) || 0) < 10_000) return { error: "Wait a few seconds before commenting again.", status: 429 };
+    this.lastComment.set(user, now);
+    const id = this.sql.exec("INSERT INTO comments (game, user, name, text, at) VALUES (?, ?, ?, ?, ?) RETURNING id", game, user, name, text, now).toArray()[0].id;
+    return { comment: { id, user, name, text, at: now } };
+  }
+  async getComment(id) {
+    return this.sql.exec("SELECT id, game, user, name, text, at, deleted FROM comments WHERE id = ?", id).toArray()[0] || null;
+  }
+  async deleteComment(id, by) {
+    this.sql.exec("UPDATE comments SET deleted = 1 WHERE id = ?", id);
+    this.sql.exec("UPDATE comment_reports SET resolved_by = ? WHERE comment = ? AND resolved_by IS NULL", by, id);
+    return { ok: true };
+  }
+  async reportComment(id, reporter) {
+    if (this.sql.exec("SELECT 1 FROM comment_reports WHERE comment = ? AND reporter = ? AND resolved_by IS NULL", id, reporter).toArray().length) {
+      return { error: "You already reported that comment.", status: 400 };
+    }
+    this.sql.exec("INSERT INTO comment_reports (comment, reporter, at) VALUES (?, ?, ?)", id, reporter, Date.now());
+    return { ok: true };
+  }
+  async commentReports() {
+    return this.sql.exec(`SELECT r.id, r.comment AS commentId, r.reporter, r.at, r.resolved_by AS resolvedBy, c.game, c.name AS author, c.text, c.deleted
+      FROM comment_reports r JOIN comments c ON c.id = r.comment ORDER BY r.resolved_by IS NOT NULL, r.id DESC LIMIT 100`).toArray();
+  }
+  async resolveCommentReport(id, by) {
+    this.sql.exec("UPDATE comment_reports SET resolved_by = ? WHERE id = ?", by, id);
+    return { ok: true };
   }
 
   async hit(id, ip, user) {

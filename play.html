@@ -95,6 +95,18 @@
         <p class="ai-note">Written by AI after reading the game's code, so it might not be perfect.</p>
       </section>
 
+      <section class="panel comments-panel" id="commentsPanel">
+        <h2>💬 Comments <span class="muted-count" id="commentCount"></span></h2>
+        <form class="comment-form" id="commentForm">
+          <textarea id="commentText" maxlength="500" rows="2" placeholder="What did you think? Tips, high scores, ideas for the creator…" aria-label="Write a comment"></textarea>
+          <div class="comment-form-row">
+            <span class="hint" id="commentChars">0 / 500</span>
+            <button class="btn btn-primary btn-small" type="submit" id="commentPost">Post</button>
+          </div>
+        </form>
+        <div id="commentList" class="comment-list"><p class="muted-note">Loading…</p></div>
+      </section>
+
       <div class="section-head">
         <span data-icon="plus"></span>
         <h2>More Games</h2>

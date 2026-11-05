@@ -215,6 +215,7 @@ async function loadUsers() {
   loadLogins();
   loadReports();
   loadChatReports();
+  loadCommentReports();
   try {
     users = (await api("/users")).users;
     renderUsers();
@@ -294,6 +295,43 @@ async function resetPassword(username) {
     if (!handleAuthError(err)) toast(err.message, true);
   }
 }
+
+/* ---------- 🗨️ Reported comments ---------- */
+async function loadCommentReports() {
+  try {
+    const { reports } = await api("/comments/reports");
+    const open = reports.filter((r) => !r.resolvedBy);
+    $("commentReportCount").textContent = open.length;
+    $("commentReportCount").classList.toggle("zero", !open.length);
+    $("commentReportsPanel").classList.toggle("has-waiting", open.length > 0);
+    $("commentReportRows").innerHTML = reports.length
+      ? reports.slice(0, 50).map((r) => `
+        <div class="report-row ${r.resolvedBy ? "done" : ""}">
+          <div class="report-info">
+            <div><b>${escapeHTML(r.author)}</b> on <a href="play.html?id=${encodeURIComponent(r.game)}" target="_blank" rel="noopener">${escapeHTML(r.gameName)}</a></div>
+            <div class="report-note">${r.deleted ? "<i>(deleted)</i> " : ""}“${escapeHTML(r.text)}”</div>
+            <div class="udate">reported by ${escapeHTML(r.reporter)} · ${ago(new Date(r.at).toISOString())}${r.resolvedBy ? ` · ✅ handled by ${escapeHTML(r.resolvedBy)}` : ""}</div>
+          </div>
+          ${r.resolvedBy ? "" : `
+            <button class="btn btn-danger" data-comment-delete="${r.commentId}">Delete comment</button>
+            <button class="btn btn-ghost btn-small" data-comment-resolve="${r.id}">It's fine</button>`}
+        </div>`).join("")
+      : `<p class="muted-note">No reported comments. 🎉</p>`;
+  } catch (err) {
+    if (!handleAuthError(err)) $("commentReportRows").innerHTML = `<p class="muted-note">Couldn't load: ${escapeHTML(err.message)}</p>`;
+  }
+}
+$("refreshCommentReportsBtn").addEventListener("click", loadCommentReports);
+$("commentReportRows").addEventListener("click", async (e) => {
+  const del = e.target.closest("[data-comment-delete]"), ok = e.target.closest("[data-comment-resolve]");
+  if (!del && !ok) return;
+  if (del && !(await askConfirm("Delete this comment for everyone?", { yes: "Delete", danger: true }))) return;
+  try {
+    await api(del ? `/comments/${del.dataset.commentDelete}/delete` : `/comments/${ok.dataset.commentResolve}/resolve`, { method: "POST" });
+    toast(del ? "Comment deleted" : "Marked as fine");
+    loadCommentReports();
+  } catch (err) { if (!handleAuthError(err)) toast(err.message, true); }
+});
 
 /* ---------- 💬 Reported chat messages ---------- */
 async function loadChatReports() {
