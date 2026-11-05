@@ -83,7 +83,7 @@ function renderHomeSections() {
       <div class="grid">${list.map((g, i) => cardHTML(g, state.user, opts(g, i))).join("")}</div>
     </section>` : "";
   const pick = (ids) => ids.map((id) => byId.get(id)).filter(Boolean);
-  const recent = section("🕹️", "Recently Played", pick(state.library.recent).slice(0, PER_SECTION));
+  const recent = section("📖", "Recently Revised", pick(state.library.recent).slice(0, PER_SECTION));
   const favs = section("⭐", "Your Favourites", pick(state.library.favs), `<span class="result-count">${state.library.favs.filter((id) => byId.has(id)).length}</span>`);
   const rated = state.rated.filter((r) => byId.has(r.id)).slice(0, PER_SECTION);
   const topRated = section("👍", "Top Rated", rated.map((r) => byId.get(r.id)), "",
@@ -92,7 +92,7 @@ function renderHomeSections() {
     <section class="home-section most-played">
       <div class="section-head">
         <span class="section-icon">🔥</span>
-        <h2>Most Played</h2>
+        <h2>Most Learnt</h2>
         <span class="result-count">Top ${top.length}</span>
       </div>
       <div class="grid">${top.map((t, i) => cardHTML(byId.get(t.id), state.user, { plays: t.count, rank: i + 1 })).join("")}</div>
