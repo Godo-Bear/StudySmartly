@@ -77,6 +77,11 @@ async function startGame() {
     }
   }
   if (!url) return toast("This game's link is broken.", true);
+  // Some sites refuse to be shown inside another page; offer to open them instead.
+  if (/^https?:\/\//i.test(url) && game.paid) {
+    const check = await userApi(`/embed/${encodeURIComponent(game.id)}`).catch(() => ({}));
+    if (check.embeddable === false) return showOpenInstead(url);
+  }
   url = await withSaveTicket(url);
   $("frame").src = url;
   // Count the play for "Most played" (fire and forget).
@@ -86,6 +91,31 @@ async function startGame() {
   $("frame").classList.remove("hidden");
   $("cover").classList.add("hidden");
   $("frame").focus();
+}
+
+// The game's website doesn't allow being framed: show "Open game" on the cover.
+let openInsteadUrl = "";
+function showOpenInstead(url) {
+  openInsteadUrl = url;
+  const btn = $("cover").querySelector(".cover-play, .open-game");
+  if (btn) btn.outerHTML = `
+    <div class="open-instead">
+      <a class="btn btn-play open-game" href="${escapeHTML(url)}" target="_blank" rel="noopener" id="openGameBtn">▶ Open game</a>
+      <p>This game's website doesn't let it play inside StudySmartly, so it opens in a new tab.</p>
+    </div>`;
+  $("cover").classList.add("locked"); // the cover itself isn't a Play button anymore
+  $("cover").removeAttribute("role");
+  $("fsBtn").disabled = true;
+  $("openGameBtn").addEventListener("click", () => {
+    fetch(`/api/plays/${encodeURIComponent(game.id)}`, {
+      method: "POST", keepalive: true, headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : {},
+    }).catch(() => {});
+  });
+}
+async function checkFraming() {
+  if (!game || game.paid || !/^https?:\/\//i.test(game.url || "")) return;
+  const r = await userApi(`/embed/${encodeURIComponent(game.id)}`).catch(() => ({}));
+  if (r.embeddable === false && $("frame").classList.contains("hidden")) showOpenInstead(safeURL(game.url));
 }
 
 /* ---------- Saved progress ----------
@@ -121,18 +151,7 @@ function renderSaveBar() {
   const bar = $("saveBar");
   if (!save.folder) return bar.classList.add("hidden");
   bar.classList.remove("hidden");
-  if (!user) {
-    bar.className = "save-bar warn";
-    bar.innerHTML = `
-      <span class="save-icon">💾</span>
-      <div class="save-text"><b>Your progress won't be saved!</b>
-        <span>Log in or make an account to save your progress, bro. It's free.</span></div>
-      <div class="save-actions">
-        <a class="btn btn-primary btn-small" href="${loginURL("signup")}">Make an account</a>
-        <a class="btn btn-ghost btn-small" href="${loginURL("login")}">Log in</a>
-      </div>`;
-    return;
-  }
+  if (!user) return bar.classList.add("hidden"); // no "log in to save" nag
   bar.className = `save-bar ${save.failed ? "warn" : "ok"}`;
   const when = save.savedAt ? `Saved ${timeAgo(save.savedAt)}` : "Progress saves automatically";
   bar.innerHTML = `
@@ -344,7 +363,7 @@ function exitFullscreen() {
 }
 
 $("cover").addEventListener("click", (e) => {
-  if (!e.target.closest("a")) startGame();
+  if (!e.target.closest("a") && !openInsteadUrl) startGame();
 });
 $("cover").addEventListener("keydown", (e) => {
   if ((e.key === "Enter" || e.key === " ") && e.target === $("cover")) { e.preventDefault(); startGame(); }
@@ -383,6 +402,7 @@ $("shareBtn").addEventListener("click", async () => {
   addCreateButton();
   render(games);
   if (game) {
+    checkFraming();
     loadSocial();
     loadOverview();
     // The game's creator or an admin can ask for a fresh overview

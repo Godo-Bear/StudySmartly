@@ -165,6 +165,22 @@ async function handleApi(request, env, url) {
     return json({ ok: true });
   }
 
+  // Can this game's website be shown inside StudySmartly's play page?
+  const em = path.match(/^\/api\/embed\/([\w-]+)$/);
+  if (em && method === "GET") {
+    const user = await approvedUser(request, env);
+    const game = await liveGame(request, env, em[1]);
+    if (!game) throw httpError(404, "That game isn't on the site (yet).");
+    let link = game.url;
+    if (game.paid) {
+      const allowed = user.admin || user.unlocked.includes(game.id) || (game.owner && game.owner.toLowerCase() === user.username.toLowerCase());
+      if (!allowed) throw httpError(403, "This game hasn't been unlocked for your account yet.");
+      link = (await env.DB.get(`url:${game.id}`)) || "";
+    }
+    if (!/^https?:\/\//i.test(link)) return json({ embeddable: true }); // hosted on StudySmartly
+    return json(await checkEmbeddable(link, new URL(request.url).origin));
+  }
+
   // 💬 Friends & chat (allowed accounts only)
   if (path.startsWith("/api/chat/")) return handleChat(request, env, url, path, method);
 
@@ -456,6 +472,38 @@ async function handleChat(request, env, url, path, method) {
   const rep = path.match(/^\/api\/chat\/messages\/(\d+)\/report$/);
   if (rep && method === "POST") return done(await hub.report(me, Number(rep[1]), body.reason));
   return json({ error: "Not found" }, 404);
+}
+
+// Read a site's X-Frame-Options / CSP frame-ancestors to see if we may frame it.
+async function checkEmbeddable(link, ourOrigin) {
+  let res;
+  try {
+    res = await fetch(link, { redirect: "follow", headers: { "User-Agent": "StudySmartly-EmbedCheck/1.0" }, signal: AbortSignal.timeout(6000) });
+  } catch {
+    return { embeddable: null }; // couldn't tell; try showing it anyway
+  }
+  try { res.body && res.body.cancel(); } catch {}
+  const ours = new URL(ourOrigin);
+  const sourceAllows = (src) => {
+    src = src.trim();
+    if (src === "*" || src === "https:" || src === `${ours.protocol}`) return true;
+    if (src === "'none'" || src === "'self'") return false;
+    const m = src.match(/^(?:(https?):\/\/)?(\*\.)?([^/:]+)(?::\d+)?\/?$/i);
+    if (!m) return false;
+    if (m[1] && `${m[1].toLowerCase()}:` !== ours.protocol) return false;
+    const host = m[3].toLowerCase();
+    return m[2] ? ours.hostname.endsWith(`.${host}`) : ours.hostname === host;
+  };
+  // Every CSP policy with frame-ancestors must allow us; if there is one, X-Frame-Options is ignored.
+  const policies = (res.headers.get("content-security-policy") || "").split(",")
+    .map((p) => (p.match(/(?:^|;)\s*frame-ancestors\s+([^;]*)/i) || [])[1]).filter((x) => x !== undefined);
+  if (policies.length) {
+    const ok = policies.every((srcs) => srcs.trim().split(/\s+/).some(sourceAllows));
+    return ok ? { embeddable: true } : { embeddable: false, reason: "frame-ancestors" };
+  }
+  const xfo = (res.headers.get("x-frame-options") || "").trim().toLowerCase();
+  if (xfo === "deny" || xfo === "sameorigin") return { embeddable: false, reason: "x-frame-options" };
+  return { embeddable: true };
 }
 
 // One game from the live (deployed) games list.

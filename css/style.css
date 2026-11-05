@@ -900,3 +900,8 @@ body.gated > *:not(.site-gate):not(.toast) { display: none !important; }
   .msg { max-width: 90%; }
   .room-code { order: 5; width: 100%; justify-content: center; }
 }
+
+/* Game sites that block being shown inside StudySmartly */
+.open-instead { display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 440px; text-align: center; padding: 0 16px; }
+.open-instead .btn-play { margin: 0; padding: 14px 34px; font-size: 20px; border-radius: 999px; }
+.open-instead p { margin: 0; font-size: 14px; opacity: .85; text-shadow: 0 2px 8px rgba(0,0,0,.5); }
