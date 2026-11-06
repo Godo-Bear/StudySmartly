@@ -225,6 +225,7 @@ function initAccount(user) {
         <div class="dd-sub">${user.admin ? "You can play every paid game" : `${user.unlocked.length} paid game${user.unlocked.length === 1 ? "" : "s"} unlocked`}</div>
         ${user.admin ? `<a class="btn btn-primary btn-small" href="admin.html" style="width:100%;margin-bottom:8px">🛡️ Admin panel</a>` : ""}
         ${user.creator && !user.admin ? `<div class="dd-sub">🎨 Creator${user.creatorUntil > 0 ? ` until ${new Date(user.creatorUntil).toLocaleDateString()}` : ""}</div>` : ""}
+        <a class="btn btn-ghost btn-small" href="${profileURL(user.username)}" style="width:100%;margin-bottom:8px">👤 My profile</a>
         <a class="btn btn-ghost btn-small" href="login.html?mode=change" style="width:100%;margin-bottom:8px">🔑 Change password</a>
         <button class="btn btn-ghost btn-small" id="logoutUserBtn" style="width:100%">Log out</button>
       </div>
@@ -274,6 +275,9 @@ function categoryCounts(games) {
 }
 function categoryURL(name) {
   return `index.html?category=${encodeURIComponent(name)}`;
+}
+function profileURL(username) {
+  return `profile.html?u=${encodeURIComponent(username)}`;
 }
 function creatorURL(name) {
   return `index.html?creator=${encodeURIComponent(name)}`;

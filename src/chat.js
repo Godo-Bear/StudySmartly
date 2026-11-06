@@ -143,6 +143,17 @@ export class ChatHub extends DurableObject {
     return { ok: true };
   }
 
+  // How the viewer is connected to someone, for their profile page
+  relation(me, other) {
+    if (me === other) return "self";
+    if (this.one("SELECT 1 FROM blocks WHERE blocker = ? AND blocked = ?", me, other)) return "blocked";
+    const [a, b] = this.pair(me, other);
+    const row = this.one("SELECT status, requested_by FROM friends WHERE a = ? AND b = ?", a, b);
+    if (!row) return "none";
+    if (row.status === "accepted") return "friends";
+    return row.requested_by === me ? "outgoing" : "incoming";
+  }
+
   /* ---------- friends ---------- */
   friendRequest(me, name, other, otherName) {
     return this.run(() => {

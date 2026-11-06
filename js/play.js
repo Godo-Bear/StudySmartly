@@ -350,9 +350,9 @@ function renderComments() {
         const isCreator = comments.owner && c.user === comments.owner.toLowerCase();
         return `
           <div class="comment" data-id="${c.id}">
-            <span class="avatar sm" style="background:${gradientFor(c.name)}">${escapeHTML(initials(c.name))}</span>
+            <a href="${profileURL(c.name)}" class="avatar sm" style="background:${gradientFor(c.name)}" aria-label="${escapeHTML(c.name)}'s profile">${escapeHTML(initials(c.name))}</a>
             <div class="comment-body">
-              <div class="comment-top"><b>${escapeHTML(c.name)}</b>${isCreator ? `<span class="creator-tag">Creator</span>` : ""}<time>${escapeHTML(ago(c.at))}</time></div>
+              <div class="comment-top"><a class="profile-link" href="${profileURL(c.name)}"><b>${escapeHTML(c.name)}</b></a>${isCreator ? `<span class="creator-tag">Creator</span>` : ""}<time>${escapeHTML(ago(c.at))}</time></div>
               <p>${escapeHTML(c.text)}</p>
               <div class="comment-actions">
                 ${mine || comments.canModerate ? `<button data-del-comment="${c.id}">Delete</button>` : ""}

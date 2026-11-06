@@ -924,3 +924,36 @@ body.gated > *:not(.site-gate):not(.toast) { display: none !important; }
 .comment-actions { display: flex; gap: 12px; margin-top: 4px; }
 .comment-actions button { border: 0; background: none; padding: 0; font-size: 12px; color: var(--muted); cursor: pointer; text-decoration: underline; }
 .comment-actions button:hover { color: var(--danger); }
+
+/* ===== Player profile ===== */
+.profile-page { padding-top: 24px; padding-bottom: 60px; }
+.profile-hero {
+  display: flex; align-items: center; gap: 22px; flex-wrap: wrap; border-radius: 24px; padding: 28px; color: #fff;
+  background: radial-gradient(circle at 90% 10%, rgba(0, 194, 255, .45), transparent 45%), linear-gradient(135deg, #3b2bb5, #6c5ce7);
+  box-shadow: var(--shadow-lg);
+}
+.profile-avatar { width: 96px; height: 96px; border-radius: 28px; display: grid; place-items: center; font: 400 38px/1 "Bungee", sans-serif; color: #fff; border: 4px solid rgba(255,255,255,.85); box-shadow: 0 10px 30px rgba(0,0,0,.3); flex-shrink: 0; }
+.profile-info { flex: 1; min-width: 200px; }
+.profile-info h1 { margin: 0; font-size: clamp(26px, 4vw, 38px); overflow-wrap: anywhere; }
+.profile-badges { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 6px; }
+.pbadge { background: rgba(255,255,255,.18); border-radius: 999px; padding: 4px 12px; font-size: 13px; font-weight: 800; }
+.pbadge.admin { background: #f5a524; color: #1a1300; }
+.pbadge.creator { background: #00f5d4; color: #04332c; }
+.profile-meta { font-size: 14px; opacity: .85; font-weight: 600; }
+.profile-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.profile-actions .btn-ghost { background: rgba(255,255,255,.16); color: #fff; }
+.profile-actions .muted-note { color: rgba(255,255,255,.85); }
+.friends-pill { background: rgba(255,255,255,.18); border-radius: 999px; padding: 6px 12px; font-weight: 800; font-size: 13px; }
+.profile-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 18px 0 6px; }
+.pstat { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; text-align: center; box-shadow: var(--shadow); }
+.pstat b { display: block; font-size: 28px; font-weight: 900; }
+.pstat span { font-size: 12px; color: var(--muted); font-weight: 800; text-transform: uppercase; letter-spacing: .5px; }
+.profile-link { color: inherit; text-decoration: none; }
+.profile-link:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+@media (max-width: 720px) {
+  .profile-stats { grid-template-columns: repeat(2, 1fr); }
+  .profile-hero { padding: 22px; }
+  .profile-avatar { width: 72px; height: 72px; font-size: 28px; border-radius: 22px; }
+}
+.profile-actions .btn-primary { background: #fff; color: #3b2bb5; box-shadow: 0 6px 18px rgba(0,0,0,.2); }
+.profile-actions .btn-primary:hover { filter: none; background: #f1efff; }

@@ -54,6 +54,18 @@ How a player gets a paid game:
 - **⭐ Favourite** button, plus **Recently Played** and **Your Favourites** at the top of the home page, saved to their account.
 - **🚩 Report** button for broken or inappropriate games.
 
+## 👤 Player profiles
+`profile.html?u=<username>` shows:
+- the player's badges (Admin, Creator), join date and when they were last on,
+- stats: games made, games revised, likes given and comments,
+- the games they made and their favourites,
+- an **Add friend**, **Accept** or **💬 Message** button.
+
+Names in comments and chat link to profiles, and **👤 My profile** is in the account menu.
+
+## Games appear straight away
+After a change, the Worker keeps the new game list, and any new thumbnail, in KV for 15 minutes. That's `games-latest` and `img:<path>`. The site uses them until Cloudflare's rebuild of `data/games.json` and `images/` has finished.
+
 ## 💬 Friends & Chat
 `chat.html` opens from the sidebar link above the game types, which has a red badge for unread messages and friend requests.
 - **Friends:** add people by username. They accept or decline the request.

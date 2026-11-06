@@ -702,7 +702,7 @@ $("gameForm").addEventListener("submit", async (e) => {
     }
     resetForm();
     renderTable();
-    setStatus("Saved to main. Live on the site in about a minute.", "ok");
+    setStatus("Saved. It’s live on the site now.", "ok");
   } catch (err) {
     if (!handleAuthError(err)) {
       showError(`Save failed: ${err.message}`);
@@ -729,7 +729,7 @@ $("gameRows").addEventListener("click", async (e) => {
     if (String(editingId) === id) resetForm();
     renderTable();
     toast(`Deleted “${g.name}”`);
-    setStatus("Saved to main. Live on the site in about a minute.", "ok");
+    setStatus("Saved. It’s live on the site now.", "ok");
   } catch (err) {
     if (!handleAuthError(err)) {
       toast(`Delete failed: ${err.message}`, true);

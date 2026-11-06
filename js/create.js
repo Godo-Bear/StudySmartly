@@ -270,7 +270,7 @@ $("gameForm").addEventListener("submit", async (e) => {
         body.entry = $("fEntry").value;
       }
       await userApi(`/my/games/${encodeURIComponent(editing.id)}`, { method: "PUT", body: JSON.stringify(body) });
-      toast(body.uploadId ? `New version of “${body.name}” is up! 🎉 Live in about a minute.` : `Saved “${body.name}”`);
+      toast(body.uploadId ? `New version of “${body.name}” is up! 🎉` : `Saved “${body.name}”`);
       resetForm();
       loadMyGames();
       return;
@@ -332,7 +332,7 @@ function resetForm() {
   $("filesLocked").classList.add("hidden");
   setSource("link");
   $("formTitle").textContent = "Add your game";
-  $("formSub").textContent = "It goes live for everyone about a minute after you publish.";
+  $("formSub").textContent = "It shows up for everyone as soon as you publish.";
   $("saveBtn").textContent = "🚀 Publish game";
   $("cancelEdit").classList.add("hidden");
   showError("");
@@ -367,7 +367,7 @@ function startEdit(id) {
   $("fPrice").value = g.price || "";
   $("priceField").classList.toggle("hidden", !g.paid);
   $("formTitle").textContent = `Edit “${g.name}”`;
-  $("formSub").textContent = "Changes show on the site about a minute after you save.";
+  $("formSub").textContent = "Changes show on the site as soon as you save.";
   $("saveBtn").textContent = "Save changes";
   $("cancelEdit").classList.remove("hidden");
   setImage(null);

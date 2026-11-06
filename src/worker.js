@@ -34,6 +34,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/games/")) return serveGameFile(request, env, url).catch(() => new Response("Error", { status: 500 }));
     if (url.pathname.startsWith("/data/")) return json({ error: "Log in with an approved account." }, 403);
+    if (url.pathname.startsWith(`/${IMAGE_DIR}/`)) return serveImage(request, env, url);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
 
     try {
@@ -132,8 +133,7 @@ async function handleApi(request, env, url) {
   // The game list, for approved accounts only.
   if (path === "/api/games" && method === "GET") {
     await approvedUser(request, env);
-    const res = await env.ASSETS.fetch(new Request(new URL("/data/games.json", request.url)));
-    return new Response(await res.text(), { headers: { "Content-Type": "application/json", "Cache-Control": "no-store" } });
+    return json(await currentGames(request, env));
   }
 
   // Link for a paid game, only for accounts it's been unlocked for.
@@ -216,6 +216,35 @@ async function handleApi(request, env, url) {
     } finally {
       await env.DB.delete(`ai-lock:${game.id}`);
     }
+  }
+
+  // 👤 A player's profile
+  const pf = path.match(/^\/api\/profile\/([\w]+)$/);
+  if (pf && method === "GET") {
+    const viewer = await approvedUser(request, env);
+    const u = await getUser(env, pf[1]);
+    const row = u ? await accessList(env).get(u.username.toLowerCase()) : null;
+    if (!u || (row && row.status === "deleted")) throw httpError(404, "There's no player with that name.");
+    const id = u.username.toLowerCase();
+    const games = await currentGames(request, env);
+    const [stats, relation] = await Promise.all([
+      playCounter(env).profileStats(id),
+      env.CHAT ? chatHub(env).relation(viewer.username.toLowerCase(), id) : "none",
+    ]);
+    const ids = new Set(games.map((g) => g.id));
+    return json({
+      profile: {
+        username: u.username,
+        joined: u.createdAt || "",
+        lastSeen: (row && row.lastSeen) || u.lastSeen || "",
+        admin: !!u.admin,
+        creator: !!u.admin || creatorActive((row && row.creatorUntil) || 0),
+        made: games.filter((g) => g.owner && g.owner.toLowerCase() === id).map((g) => g.id),
+        favourites: stats.favs.filter((g) => ids.has(g)),
+        stats: { gamesRevised: stats.played, likesGiven: stats.likes, comments: stats.comments },
+      },
+      relation, // self | friends | incoming | outgoing | blocked | none
+    });
   }
 
   // 💬 Comments on a game
@@ -512,6 +541,19 @@ async function handleChat(request, env, url, path, method) {
   return json({ error: "Not found" }, 404);
 }
 
+// Thumbnails: the site's own copy, or (for a few minutes after upload) KV.
+async function serveImage(request, env, url) {
+  const res = await env.ASSETS.fetch(request);
+  if (res.status !== 404 || !env.DB) return res;
+  const path = decodeURIComponent(url.pathname.slice(1));
+  const b64 = isOurImage(path) ? await env.DB.get(`img:${path}`) : null;
+  if (!b64) return res;
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Response(bytes, { headers: { "Content-Type": mimeFor(path), "Cache-Control": "no-store" } });
+}
+
 // Read a site's X-Frame-Options / CSP frame-ancestors to see if we may frame it.
 async function checkEmbeddable(link, ourOrigin) {
   let res;
@@ -546,25 +588,29 @@ async function checkEmbeddable(link, ourOrigin) {
 
 // One game from the live (deployed) games list.
 async function liveGame(request, env, id) {
+  return (await currentGames(request, env)).find((g) => g.id === id) || null;
+}
+
+// The game list as it is right now. After a change, the site's own copy of
+// data/games.json only updates once Cloudflare has rebuilt the site (1-3
+// minutes), so for a while we serve the copy saved in KV at commit time.
+const FRESH_FOR = 15 * 60; // seconds; the rebuild is long done by then
+async function currentGames(request, env) {
+  const fresh = await env.DB.get("games-latest", "json").catch(() => null);
+  if (fresh && Array.isArray(fresh.games)) return fresh.games;
   try {
     const res = await env.ASSETS.fetch(new Request(new URL("/data/games.json", request.url)));
     const games = await res.json();
-    return (Array.isArray(games) ? games : []).find((g) => g.id === id) || null;
+    return Array.isArray(games) ? games : [];
   } catch {
-    return null;
+    return [];
   }
 }
 
 // Creators can always play their own paid games (checked against the live games list).
 async function ownsGame(request, env, user, id) {
-  try {
-    const res = await env.ASSETS.fetch(new Request(new URL("/data/games.json", request.url)));
-    const games = await res.json();
-    const g = (Array.isArray(games) ? games : []).find((x) => x.id === id);
-    return !!(g && g.owner && g.owner.toLowerCase() === user.username.toLowerCase());
-  } catch {
-    return false;
-  }
+  const g = await liveGame(request, env, id);
+  return !!(g && g.owner && g.owner.toLowerCase() === user.username.toLowerCase());
 }
 
 async function getUpload(env, id, user) {
@@ -1175,6 +1221,13 @@ async function mutate(env, change, message, files = {}) {
     })).sha;
     try {
       await gh(env, `/git/refs/heads/${encodeURIComponent(branch)}`, { method: "PATCH", body: JSON.stringify({ sha: commit, force: false }) });
+      // Show the change straight away, before Cloudflare's rebuild finishes.
+      try {
+        await env.DB.put("games-latest", JSON.stringify({ at: Date.now(), games: next }), { expirationTtl: FRESH_FOR });
+        for (const [path, data] of Object.entries(extra)) {
+          if (data !== null) await env.DB.put(`img:${path}`, data, { expirationTtl: FRESH_FOR });
+        }
+      } catch {}
       return next;
     } catch (err) {
       // 422 "not a fast forward": main moved since we read it
@@ -1253,6 +1306,16 @@ export class PlayCounter extends DurableObject {
       reporter TEXT NOT NULL, at INTEGER NOT NULL, resolved_by TEXT)`);
     this.recent = new Map(); // "ip|game" -> time, to ignore spam clicks
     this.lastComment = new Map(); // user -> time, to slow down spam
+  }
+
+  async profileStats(user) {
+    const one = (q) => this.sql.exec(q, user).toArray()[0].n;
+    return {
+      favs: this.sql.exec("SELECT game FROM favs WHERE user = ? ORDER BY at DESC", user).toArray().map((r) => r.game),
+      played: one("SELECT COUNT(*) AS n FROM recent WHERE user = ?"),
+      likes: one("SELECT COUNT(*) AS n FROM votes WHERE user = ? AND v = 1"),
+      comments: one("SELECT COUNT(*) AS n FROM comments WHERE user = ? AND deleted = 0"),
+    };
   }
 
   /* ----- 💬 comments on games ----- */

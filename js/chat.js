@@ -61,7 +61,7 @@ function renderFriends() {
   $("friendsBadge").classList.toggle("hidden", !state.incoming.length);
   $("requestList").innerHTML =
     (state.incoming.length ? `<div class="list-head">Friend requests</div>` + state.incoming.map((n) => `
-      <div class="friend-row request">${avatar(n)}<b>${escapeHTML(n)}</b>
+      <div class="friend-row request">${avatar(n)}<a class="profile-link" href="${profileURL(n)}"><b>${escapeHTML(n)}</b></a>
         <button class="btn btn-primary btn-small" data-accept="${escapeHTML(n)}">Accept</button>
         <button class="btn btn-ghost btn-small" data-decline="${escapeHTML(n)}">Decline</button>
       </div>`).join("") : "") +
@@ -71,7 +71,7 @@ function renderFriends() {
       </div>`).join("") : "");
   $("friendList").innerHTML = `<div class="list-head">Friends (${state.friends.length})</div>` + (state.friends.length
     ? state.friends.map((n) => `
-      <div class="friend-row">${avatar(n)}<b>${escapeHTML(n)}</b>
+      <div class="friend-row">${avatar(n)}<a class="profile-link" href="${profileURL(n)}"><b>${escapeHTML(n)}</b></a>
         <button class="btn btn-primary btn-small" data-dm="${escapeHTML(n)}">💬 Message</button>
       </div>`).join("")
     : `<p class="muted-note">No friends yet. Add someone by their username above.</p>`);
@@ -166,7 +166,8 @@ async function openRoom(id) {
   $("chatEmpty").classList.add("hidden");
   $("chatRoom").classList.remove("hidden");
   $("chatApp").classList.add("show-room");
-  $("roomName").textContent = current.type === "group" ? current.name : current.name;
+  $("roomName").innerHTML = current.type === "group" ? escapeHTML(current.name)
+    : `<a class="profile-link" href="${profileURL(current.name)}">${escapeHTML(current.name)}</a>`;
   $("roomSub").textContent = current.type === "group"
     ? `${current.members.length} member${current.members.length === 1 ? "" : "s"}: ${current.members.join(", ")}`
     : "Direct message";
@@ -201,7 +202,7 @@ function addMessage(m) {
     el.innerHTML = `
       ${!mine && !sameAsPrev ? avatar(m.name, true) : `<span class="avatar-gap"></span>`}
       <div class="bubble-wrap">
-        ${!mine && !sameAsPrev && current.type === "group" ? `<div class="msg-name">${escapeHTML(m.name)}</div>` : ""}
+        ${!mine && !sameAsPrev && current.type === "group" ? `<a class="msg-name profile-link" href="${profileURL(m.name)}">${escapeHTML(m.name)}</a>` : ""}
         <div class="bubble ${m.deleted ? "removed" : ""}">${m.deleted ? "Message removed by an admin" : escapeHTML(m.text)}</div>
         <div class="msg-meta"><time>${escapeHTML(timeLabel(m.at))}</time>
           ${!mine && !m.deleted ? `<button class="msg-report" data-report="${m.id}" title="Report this message">Report</button>` : ""}</div>
