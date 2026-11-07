@@ -957,3 +957,5 @@ body.gated > *:not(.site-gate):not(.toast) { display: none !important; }
 }
 .profile-actions .btn-primary { background: #fff; color: #3b2bb5; box-shadow: 0 6px 18px rgba(0,0,0,.2); }
 .profile-actions .btn-primary:hover { filter: none; background: #f1efff; }
+.onenote-btn { color: #7719aa; }
+:root[data-theme="dark"] .onenote-btn { color: #d59bff; }
