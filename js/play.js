@@ -410,6 +410,19 @@ async function loadSocial() {
   } catch {}
 }
 
+/* ---------- 📓 OneNote button ----------
+   Opens OneNote in a new tab, then tries to close this tab. Browsers only let
+   a page close tabs it opened itself, so if closing is blocked, this tab is
+   replaced by OneNote too (replace() also drops the game from Back history). */
+$("oneNoteBtn").addEventListener("click", (e) => {
+  e.preventDefault();
+  const url = $("oneNoteBtn").href;
+  window.open(url, "_blank", "noopener");
+  $("frame").src = "about:blank"; // stop the game straight away
+  window.close();
+  setTimeout(() => location.replace(url), 150); // still here: closing was blocked
+});
+
 /* ---------- Fullscreen ---------- */
 function isFullscreen() {
   return !!(document.fullscreenElement || document.webkitFullscreenElement) || $("player").classList.contains("fake-fs");
